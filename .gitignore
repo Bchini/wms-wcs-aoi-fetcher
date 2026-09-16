@@ -1,0 +1,6 @@
+tiles/
+*.tif
+*.vrt
+*.part
+__pycache__/
+*.pyc

@@ -1,0 +1,3 @@
+# GDAL command-line tools are required separately (not a pip dependency
+# here) -- see README. No third-party Python packages are needed for the
+# core fetch.py script; the standard library covers HTTP + JSON.
