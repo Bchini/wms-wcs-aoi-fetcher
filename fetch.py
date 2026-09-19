@@ -50,6 +50,28 @@ def run(args: list[str], gdal_bin: Path | None) -> None:
     subprocess.run(args, check=True, env=gdal_env(gdal_bin))
 
 
+def wms_bbox(minx: float, miny: float, maxx: float, maxy: float, crs: str, version: str) -> str:
+    """Return a WMS BBOX, accounting for the WMS 1.3 EPSG:4326 axis order."""
+    if version == "1.3.0" and crs.upper() == "EPSG:4326":
+        return f"{miny},{minx},{maxy},{maxx}"
+    return f"{minx},{miny},{maxx},{maxy}"
+
+
+def wms_crs_parameter(version: str) -> str:
+    return "crs" if version == "1.3.0" else "srs"
+
+
+def service_url(base_url: str, params: dict[str, str]) -> str:
+    """Append encoded OGC parameters to endpoints with or without a query string."""
+    if "?" not in base_url:
+        separator = "?"
+    elif base_url.endswith(("?", "&")):
+        separator = ""
+    else:
+        separator = "&"
+    return base_url + separator + urllib.parse.urlencode(params, safe=":,/")
+
+
 def aoi_extent(aoi_path: Path, gdal_bin: Path | None) -> tuple[float, float, float, float]:
     """Return (minx, miny, maxx, maxy) of the AOI, in the AOI's own CRS.
 
@@ -82,6 +104,12 @@ def http_get(url: str, destination: Path | None, attempts: int, timeout: int) ->
                     return response.read()
                 temp = destination.with_suffix(destination.suffix + ".part")
                 with temp.open("wb") as fh:
+                    first_chunk = response.read(4096)
+                    content_type = response.headers.get_content_type().lower()
+                    if content_type in {"text/xml", "application/xml", "text/html"} or b"ServiceException" in first_chunk:
+                        detail = first_chunk.decode("utf-8", errors="replace").strip()
+                        raise RuntimeError(f"Server returned an OGC/service error instead of raster data: {detail[:500]}")
+                    fh.write(first_chunk)
                     while chunk := response.read(1024 * 1024):
                         fh.write(chunk)
                 temp.replace(destination)
@@ -108,7 +136,7 @@ def fetch_wcs(args: argparse.Namespace) -> Path:
         "resy": str(args.resolution),
         "format": args.format or "GeoTIFF",
     }
-    url = args.url.rstrip("?") + "?" + urllib.parse.urlencode(params, safe=":,/")
+    url = service_url(args.url, params)
     print(f"GetCoverage: {url}", flush=True)
 
     raw = Path(args.out).with_name(Path(args.out).stem + "_RAW.tif")
@@ -140,7 +168,8 @@ def fetch_wms(args: argparse.Namespace) -> Path:
     cols = math.ceil((maxx - minx) / (tile_w * args.resolution))
     rows = math.ceil((maxy - miny) / (tile_h * args.resolution))
 
-    tiles_dir = Path(args.out).parent / "tiles"
+    # Keep resumable tile caches separate when several outputs share a folder.
+    tiles_dir = Path(args.out).parent / f"{Path(args.out).stem}_tiles"
     tiles_dir.mkdir(parents=True, exist_ok=True)
     tif_paths: list[Path] = []
 
@@ -167,15 +196,13 @@ def fetch_wms(args: argparse.Namespace) -> Path:
                     "request": "GetMap",
                     "layers": args.layer,
                     "styles": "",
-                    "srs": args.crs,
-                    "bbox": f"{txmin},{tymin},{txmax},{tymax}",
+                    wms_crs_parameter(args.wms_version): args.crs,
+                    "bbox": wms_bbox(txmin, tymin, txmax, tymax, args.crs, args.wms_version),
                     "width": str(width),
                     "height": str(height),
                     "format": args.format or "image/png",
                 }
-                get_map_url = args.url.rstrip("?") + "?" + urllib.parse.urlencode(
-                    params, safe=":,/"
-                )
+                get_map_url = service_url(args.url, params)
                 target_url = get_map_url
                 if args.relay == "microlink":
                     # Renders the WMS response through a headless-browser
@@ -285,13 +312,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--format", default=None, help="WMS image format (default image/png) or WCS format (default GeoTIFF)")
     parser.add_argument("--tile-size", type=int, nargs=2, default=[1024, 1024], metavar=("WIDTH", "HEIGHT"), help="WMS tile size in pixels (default: 1024 1024)")
     parser.add_argument("--image-ext", default="png", help="File extension for downloaded WMS tiles (default: png)")
-    parser.add_argument("--wms-version", default="1.1.1")
-    parser.add_argument("--wcs-version", default="1.0.0")
+    parser.add_argument("--wms-version", choices=["1.1.1", "1.3.0"], default="1.1.1")
+    parser.add_argument("--wcs-version", choices=["1.0.0"], default="1.0.0", help="WCS 1.0.0 GetCoverage version")
     parser.add_argument("--relay", choices=["none", "microlink"], default="none", help="Fetch WMS tiles through a screenshot relay (see --help text on fetch_wms). Never applies to WCS.")
     parser.add_argument("--gdal-bin", type=Path, default=None, help="Directory containing GDAL binaries, if not on PATH")
     parser.add_argument("--retries", type=int, default=5)
     parser.add_argument("--timeout", type=int, default=180)
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.resolution <= 0:
+        parser.error("--resolution must be greater than zero")
+    if any(value <= 0 for value in args.tile_size):
+        parser.error("--tile-size values must be greater than zero")
+    if args.retries < 1:
+        parser.error("--retries must be at least 1")
+    if args.timeout < 1:
+        parser.error("--timeout must be at least 1")
+    return args
 
 
 def main(argv: list[str] | None = None) -> None:
