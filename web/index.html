@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Build validated WMS and WCS AOI download commands." />
+    <meta name="description" content="Configure WMS and WCS AOI raster requests." />
     <title>AOI Raster Fetcher</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
@@ -13,7 +13,7 @@
       <header class="hero">
         <p class="eyebrow">WMS · WCS · GDAL</p>
         <h1>Fetch raster data,<br /><em>only where you need it.</em></h1>
-        <p class="lede">Configure a reproducible, AOI-clipped GeoTIFF download. Copy the command and run it locally with Python and GDAL.</p>
+        <p class="lede">Configure a reproducible, AOI-clipped GeoTIFF download.</p>
       </header>
 
       <section class="notice" aria-label="Important distinction">
@@ -56,24 +56,21 @@
             <label>Image format <select name="format"><option value="image/png">PNG</option><option value="image/jpeg">JPEG</option></select></label>
           </fieldset>
         </form>
-
-        <aside class="result" aria-live="polite">
-          <p class="eyebrow">READY TO RUN</p>
-          <h2>Your local command</h2>
-          <pre><code id="command">Complete the required fields to generate a command.</code></pre>
-          <div class="actions">
-            <button id="copy" type="button" disabled>Copy command</button>
-            <button id="download" type="button" class="secondary" disabled>Download .cmd</button>
-          </div>
-          <p class="status" id="status">No data is uploaded from this page.</p>
-          <details>
-            <summary>Before you run it</summary>
-            <ol><li>Install Python 3.9+ and GDAL.</li><li>Clone this repository.</li><li>Run the command from the repository folder.</li></ol>
-          </details>
-        </aside>
+        <a class="contact" href="mailto:adel.bchini@gmail.com">Contact</a>
+        <section class="feedback" aria-labelledby="feedback-title">
+          <p class="eyebrow">FEEDBACK</p>
+          <h2 id="feedback-title">Report an error</h2>
+          <p>Describe what happened so it can be corrected in a future update.</p>
+          <form id="feedback-form">
+            <label>Error message or issue
+              <textarea id="feedback-message" required rows="5" placeholder="Paste the error message and the step that triggered it."></textarea>
+            </label>
+            <button type="submit">Send feedback</button>
+          </form>
+          <p class="feedback-note" id="feedback-status">Your email app will open with the report pre-filled; you choose whether to send it.</p>
+        </section>
       </div>
     </main>
-    <footer>Open source · Native WCS values are not interchangeable with WMS colours.</footer>
     <script src="app.js"></script>
   </body>
 </html>
