@@ -15,5 +15,16 @@
       "database_id": "8fd34457-faac-4248-97c9-ef2f2ab5b299",
       "migrations_dir": "migrations"
     }
+  ],
+  // Cloudflare tracks Durable Object classes at the account level, tied to
+  // this script, independent of whether the class is still declared above.
+  // Simply removing the old "containers"/"durable_objects" blocks (and the
+  // GdalProcessor class from src/worker.mjs) left the account still
+  // expecting that class to exist -- every deploy failed with "does not
+  // export class 'GdalProcessor' which is depended on by existing Durable
+  // Objects" until this delete-class migration retires it properly.
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["GdalProcessor"] },
+    { "tag": "v2", "deleted_classes": ["GdalProcessor"] }
   ]
 }
