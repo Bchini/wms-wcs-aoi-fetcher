@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="description" content="Paste a WMS, WCS, or WMTS URL and download a clipped GeoTIFF." />
+    <meta name="description" content="Paste a WMS or WCS URL and download a clipped GeoTIFF, processed entirely in your browser." />
     <title>AOI Raster Fetcher</title>
     <link rel="icon" href="favicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="styles.css" />
@@ -11,9 +11,9 @@
   <body>
     <main>
       <header class="hero">
-        <p class="eyebrow">WMS · WCS · WMTS · GDAL</p>
+        <p class="eyebrow">WMS · WCS · GDAL (in your browser)</p>
         <h1>Fetch raster data,<br /><em>from one link.</em></h1>
-        <p class="lede">Paste a service URL — a GetCapabilities link, a bare endpoint, or a full GetMap/GetCoverage request — and run it. The layer, area, CRS, and resolution are detected automatically.</p>
+        <p class="lede">Paste a service URL — a GetCapabilities link, a bare endpoint, or a full GetMap/GetCoverage request — and run it. The layer, area, CRS, and resolution are detected automatically; the clip itself runs entirely on your device.</p>
       </header>
 
       <div class="workspace">
@@ -21,7 +21,7 @@
           <label class="url-field">Service URL
             <input id="service-url" name="url" type="url" placeholder="https://server.example.org/geoserver/wms?request=GetCapabilities" required />
           </label>
-          <p class="hint">Works with WMS, WCS, or WMTS. Give it a full GetMap/GetCoverage URL to clip exactly that BBOX, or just an endpoint to fetch the first layer's full extent.</p>
+          <p class="hint">Works with WMS or WCS. Give it a full GetMap/GetCoverage URL to clip exactly that BBOX, or just an endpoint to fetch the first layer's full extent.</p>
           <button class="launch" type="submit">RUN</button>
           <div class="progress-track" id="progress-track" hidden>
             <div class="progress-fill" id="progress-fill" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Processing progress"></div>
@@ -43,6 +43,6 @@
         </section>
       </div>
     </main>
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

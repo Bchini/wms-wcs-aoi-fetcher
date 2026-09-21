@@ -7,12 +7,12 @@ single GeoTIFF — without manually clicking through a web portal tile by tile.
 
 **[Open the AOI Raster Fetcher](https://wms-wcs-aoi-fetcher.adel-bchini.workers.dev/)**
 
-Paste a WMS, WCS, or WMTS URL and press **RUN**. That's the whole interface —
+Paste a WMS or WCS URL and press **RUN**. That's the whole interface —
 everything else is detected automatically:
 
 - **Service and version** — from a `SERVICE=`/`VERSION=` parameter if the URL
-  has one, else guessed from the path (`.../wms`, `.../wcs`, `.../wmts`), else
-  found by probing GetCapabilities for each in turn.
+  has one, else guessed from the path (`.../wms`, `.../wcs`), else found by
+  probing GetCapabilities for each in turn.
 - **Layer** — from `LAYERS=`/`COVERAGE=`/etc. if given, else the first
   georeferenced layer the service advertises.
 - **CRS** — from `CRS=`/`SRS=` if given, else `EPSG:4326`.
@@ -22,11 +22,20 @@ everything else is detected automatically:
   endpoint or GetCapabilities link instead fetches the layer's full advertised
   extent, sized to roughly 2048 px on the longer side.
 
-Cloudflare runs GDAL in a container, clips the resolved raster, and starts the
-GeoTIFF download when processing completes — a progress bar tracks it (the
-container returns one finished response, so it's a decelerating estimate, not
-a byte count). Error reports are saved directly in the app's Cloudflare D1
+**The actual clip/mosaic/reproject runs entirely in your browser**, via
+[gdal3.js](https://github.com/bugra9/gdal3.js) (real GDAL compiled to
+WebAssembly) — the Cloudflare Worker only resolves the URL (`/api/resolve`)
+and proxies the raw WMS/WCS bytes past the source server's CORS policy
+(`/api/proxy`); it never touches the raster itself. That's deliberate: it
+keeps the whole app on Cloudflare's **free** Workers plan (Cloudflare
+Containers, which the previous server-side-GDAL version of this app used,
+requires the paid plan). The progress bar reflects real tiles fetched/warped,
+not a fake timer. Error reports are saved in the app's Cloudflare D1
 database. Every request is capped at 25 million output pixels.
+
+Because GDAL now runs client-side, **WMTS isn't supported** (its tile-matrix
+math isn't implemented in the browser runner, and `fetch.py` never supported
+it either) — use a WMS/WCS endpoint if the server offers one.
 
 Grew out of fetching a 1m DSM from a Brazilian state WMS/WCS server for one
 small area of interest, where downloading the whole state was never an
@@ -46,10 +55,41 @@ If a server exposes both, prefer WCS for anything you intend to compute on.
 
 ## CLI vs. the web app
 
-The URL auto-detection above is a feature of the web app's container
-(`container/server.py`, `interpret_url()`), not of `fetch.py` itself — the CLI
+The URL auto-detection above is a feature of the web app's Worker
+(`src/resolve.mjs`, `interpretUrl()`), not of `fetch.py` itself — the CLI
 below still takes explicit `--service`/`--layer`/`--crs`/`--aoi` flags, since
-it has no notion of "the URL you pasted," only the fields you pass it.
+it has no notion of "the URL you pasted," only the fields you pass it. The two
+are otherwise independent: the CLI runs local GDAL binaries over a real AOI
+file, the web app runs gdal3.js (WASM) in the browser over a BBOX.
+
+## Web app architecture
+
+```
+web/index.html, app.js   →  UI + orchestration
+web/ogc.js                  →  BBOX/tile-grid math shared with fetch.py's logic
+web/gdal-runner.js           →  loads gdal3.js, runs gdalwarp/gdal_translate
+src/worker.mjs               →  routes /api/*, serves static assets
+src/resolve.mjs, xml.mjs     →  interpret the pasted URL (no GDAL needed)
+```
+
+1. The browser POSTs the pasted URL to `/api/resolve`. The Worker fetches and
+   parses GetCapabilities (`fast-xml-parser`) if needed and returns the
+   resolved service/layer/CRS/bounds/resolution — no raster bytes involved.
+2. For **WCS**, the browser fetches the single GetCoverage response through
+   `/api/proxy` and runs one `gdalwarp -te ... -tr ... -t_srs ...` in WASM.
+3. For **WMS**, the browser fetches each GetMap tile through `/api/proxy`,
+   georeferences it (`gdal_translate -a_srs -a_ullr`), and warps it onto the
+   *same* full-extent grid with `-dstalpha` (transparent outside that tile's
+   own footprint). gdal3.js's `gdalwarp` takes exactly one source dataset —
+   verified empirically, it has no `gdalbuildvrt` and a second call to the
+   same destination replaces rather than merges — so the tiles are instead
+   composited on a `<canvas>` (transparent pixels don't overwrite pixels an
+   earlier tile already drew) and the composite is re-georeferenced with one
+   more `gdal_translate -a_srs -a_ullr` call.
+4. `/api/proxy` exists only because most government WMS/WCS servers don't
+   send CORS headers; it does not process anything, just relays bytes past
+   the browser's cross-origin restrictions (same-origin `Sec-Fetch-Site`
+   checked, private/loopback hosts rejected, 80 MB cap, 60 s timeout).
 
 ## Requirements
 

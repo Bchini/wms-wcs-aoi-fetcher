@@ -1,9 +1,0 @@
-.git
-.playwright-cli
-deploy
-node_modules
-output
-tests
-web
-__pycache__
-*.pyc

@@ -5,10 +5,11 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "tail": "wrangler tail"
+    "tail": "wrangler tail",
+    "test": "node --test tests/*.mjs"
   },
   "dependencies": {
-    "@cloudflare/containers": "^0.3.7"
+    "fast-xml-parser": "^5.11.1"
   },
   "devDependencies": {
     "wrangler": "^4.42.1"
