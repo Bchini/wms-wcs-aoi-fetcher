@@ -45,6 +45,8 @@
             <p class="hint">Accepted: GeoJSON, GeoPackage, or a ZIP containing all Shapefile parts. The AOI must already use the query CRS.</p>
             <label>BBOX <span class="optional">required only without an AOI</span><input name="bbox" type="text" inputmode="decimal" placeholder="minX,minY,maxX,maxY" /></label>
             <p class="hint">Use the same CRS as the request. A BBOX is converted to a temporary AOI in Cloudflare.</p>
+            <label class="full-extent"><input name="fullExtent" type="checkbox" checked /> Use the full extent advertised by the service when no AOI or BBOX is supplied.</label>
+            <p class="hint">This can be large. For safety, full-extent requests are limited to 25 million output pixels.</p>
             <div class="two-col">
               <label>CRS <input name="crs" type="text" value="EPSG:31982" required pattern="EPSG:\d+" /></label>
               <label>Resolution <input name="resolution" type="number" min="0.000001" step="any" value="1" required /></label>

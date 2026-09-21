@@ -13,6 +13,10 @@ press **LANCER**. Cloudflare runs GDAL in a container, clips the requested
 raster, and starts the GeoTIFF download when processing completes. Error
 reports are saved directly in the app's Cloudflare D1 database.
 
+When no AOI or BBOX is supplied, the interface can use the full extent
+advertised by the selected service. It is limited to 25 million output pixels
+to prevent unexpectedly large downloads.
+
 Grew out of fetching a 1m DSM from a Brazilian state WMS/WCS server for one
 small area of interest, where downloading the whole state was never an
 option.

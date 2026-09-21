@@ -55,9 +55,10 @@ form.addEventListener('submit', async (event) => {
   const payload = new FormData(form);
   const aoi = payload.get('aoi');
   const bbox = String(payload.get('bbox') || '').trim();
+  const fullExtent = payload.get('fullExtent') === 'on';
   if (!(aoi instanceof File) || !aoi.size) {
-    if (!bbox) {
-      processStatus.textContent = 'Choose an AOI file or enter a BBOX before launching.';
+    if (!bbox && !fullExtent) {
+      processStatus.textContent = 'Choose an AOI file, enter a BBOX, or enable the full service extent.';
       return;
     }
   }
