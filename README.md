@@ -8,10 +8,10 @@ single GeoTIFF — without manually clicking through a web portal tile by tile.
 **[Open the AOI Raster Fetcher](https://wms-wcs-aoi-fetcher.adel-bchini.workers.dev/)**
 
 The online interface lets users upload a GeoJSON, GeoPackage, or ZIP
-Shapefile AOI, select WCS, WMS, or WMTS, and press **LANCER**. Cloudflare runs
-GDAL in a container, clips the requested raster, and starts the GeoTIFF
-download when processing completes. Error reports are saved directly in the
-app's Cloudflare D1 database.
+Shapefile AOI — or simply enter a BBOX — then select WCS, WMS, or WMTS and
+press **LANCER**. Cloudflare runs GDAL in a container, clips the requested
+raster, and starts the GeoTIFF download when processing completes. Error
+reports are saved directly in the app's Cloudflare D1 database.
 
 Grew out of fetching a 1m DSM from a Brazilian state WMS/WCS server for one
 small area of interest, where downloading the whole state was never an

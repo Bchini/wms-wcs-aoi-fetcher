@@ -13,7 +13,7 @@
       <header class="hero">
         <p class="eyebrow">WMS · WCS · WMTS · GDAL</p>
         <h1>Fetch raster data,<br /><em>only where you need it.</em></h1>
-        <p class="lede">Upload an AOI, run the request in Cloudflare, then download a GeoTIFF clipped to your area.</p>
+        <p class="lede">Upload an AOI — or enter a BBOX — run the request in Cloudflare, then download a clipped GeoTIFF.</p>
       </header>
 
       <section class="notice" aria-label="Important distinction">
@@ -41,8 +41,10 @@
           </fieldset>
           <fieldset>
             <legend>2. Area and output</legend>
-            <label>AOI file <input name="aoi" type="file" accept=".geojson,.json,.gpkg,.zip" required /></label>
+            <label>AOI file <span class="optional">optional</span><input name="aoi" type="file" accept=".geojson,.json,.gpkg,.zip" /></label>
             <p class="hint">Accepted: GeoJSON, GeoPackage, or a ZIP containing all Shapefile parts. The AOI must already use the query CRS.</p>
+            <label>BBOX <span class="optional">required only without an AOI</span><input name="bbox" type="text" inputmode="decimal" placeholder="minX,minY,maxX,maxY" /></label>
+            <p class="hint">Use the same CRS as the request. A BBOX is converted to a temporary AOI in Cloudflare.</p>
             <div class="two-col">
               <label>CRS <input name="crs" type="text" value="EPSG:31982" required pattern="EPSG:\d+" /></label>
               <label>Resolution <input name="resolution" type="number" min="0.000001" step="any" value="1" required /></label>

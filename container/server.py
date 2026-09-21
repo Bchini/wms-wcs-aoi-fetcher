@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ipaddress
+import json
+import math
 import shutil
 import subprocess
 import sys
@@ -48,6 +50,25 @@ def require_text(value: str, label: str, limit: int = 512) -> str:
     if not cleaned or len(cleaned) > limit or "\x00" in cleaned:
         raise HTTPException(422, f"Invalid {label}.")
     return cleaned
+
+
+def create_bbox_aoi(value: str, directory: Path) -> Path:
+    try:
+        coordinates = [float(part.strip()) for part in value.split(",")]
+    except ValueError as error:
+        raise HTTPException(422, "BBOX must use minX,minY,maxX,maxY.") from error
+    if len(coordinates) != 4 or not all(math.isfinite(part) for part in coordinates):
+        raise HTTPException(422, "BBOX must use four finite coordinates: minX,minY,maxX,maxY.")
+    min_x, min_y, max_x, max_y = coordinates
+    if min_x >= max_x or min_y >= max_y:
+        raise HTTPException(422, "BBOX must have min values lower than max values.")
+    aoi = directory / "bbox.geojson"
+    geometry = {
+        "type": "Polygon",
+        "coordinates": [[[min_x, min_y], [max_x, min_y], [max_x, max_y], [min_x, max_y], [min_x, min_y]]],
+    }
+    aoi.write_text(json.dumps({"type": "FeatureCollection", "features": [{"type": "Feature", "properties": {}, "geometry": geometry}]}), encoding="utf-8")
+    return aoi
 
 
 async def save_upload(upload: UploadFile, directory: Path) -> Path:
@@ -160,7 +181,8 @@ def process_wms_or_wcs(
 
 @app.post("/api/process")
 async def process(
-    aoi: UploadFile = File(...),
+    aoi: UploadFile | None = File(None),
+    bbox: str = Form(""),
     service: str = Form(...),
     url: str = Form(...),
     layer: str = Form(...),
@@ -193,7 +215,7 @@ async def process(
 
     directory = Path(tempfile.mkdtemp(prefix="wms-wcs-aoi-"))
     try:
-        aoi_path = await save_upload(aoi, directory)
+        aoi_path = await save_upload(aoi, directory) if aoi and aoi.filename else create_bbox_aoi(bbox, directory)
         output = directory / "aoi_result.tif"
         if service == "wmts":
             process_wmts(endpoint, layer, aoi_path, output, crs, resolution, tileMatrixSet.strip(), zoomLevel, directory)

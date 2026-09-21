@@ -54,18 +54,21 @@ form.addEventListener('submit', async (event) => {
 
   const payload = new FormData(form);
   const aoi = payload.get('aoi');
+  const bbox = String(payload.get('bbox') || '').trim();
   if (!(aoi instanceof File) || !aoi.size) {
-    processStatus.textContent = 'Choose an AOI file before launching.';
-    return;
+    if (!bbox) {
+      processStatus.textContent = 'Choose an AOI file or enter a BBOX before launching.';
+      return;
+    }
   }
-  if (aoi.size > 20 * 1024 * 1024) {
+  if (aoi instanceof File && aoi.size > 20 * 1024 * 1024) {
     processStatus.textContent = 'The AOI file must not exceed 20 MB.';
     return;
   }
 
   launchButton.disabled = true;
   launchButton.textContent = 'PROCESSING…';
-  processStatus.textContent = 'Cloudflare is processing your AOI. Keep this page open until the download starts.';
+  processStatus.textContent = 'Cloudflare is processing your request. Keep this page open until the download starts.';
   try {
     const response = await fetch('/api/process', { method: 'POST', body: payload });
     if (!response.ok) {
