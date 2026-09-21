@@ -11,9 +11,9 @@
   <body>
     <main>
       <header class="hero">
-        <p class="eyebrow">WMS · WCS · GDAL</p>
+        <p class="eyebrow">WMS · WCS · WMTS · GDAL</p>
         <h1>Fetch raster data,<br /><em>only where you need it.</em></h1>
-        <p class="lede">Configure a reproducible, AOI-clipped GeoTIFF download.</p>
+        <p class="lede">Upload an AOI, run the request in Cloudflare, then download a GeoTIFF clipped to your area.</p>
       </header>
 
       <section class="notice" aria-label="Important distinction">
@@ -30,22 +30,24 @@
               <label for="wcs">WCS <small>Native pixels</small></label>
               <input id="wms" name="service" type="radio" value="wms" />
               <label for="wms">WMS <small>Rendered image</small></label>
+              <input id="wmts" name="service" type="radio" value="wmts" />
+              <label for="wmts">WMTS <small>Tiled map</small></label>
             </div>
-            <label>Endpoint <input name="url" type="url" placeholder="https://server.example.org/geoserver/wcs" required /></label>
-            <label>Layer / coverage ID <input name="layer" type="text" placeholder="workspace:coverage_name" required /></label>
+            <label id="endpoint-label">Endpoint <input id="endpoint" name="url" type="url" placeholder="https://server.example.org/geoserver/wcs" required /></label>
+            <label id="layer-label">Layer / coverage ID <input name="layer" type="text" placeholder="workspace:coverage_name" required /></label>
             <label>Protocol version
               <select name="version" id="version"><option value="1.0.0">WCS 1.0.0</option></select>
             </label>
           </fieldset>
           <fieldset>
             <legend>2. Area and output</legend>
-            <label>AOI file path <input name="aoi" type="text" placeholder="C:\data\aoi.gpkg" required /></label>
-            <p class="hint">The AOI must already use the query CRS.</p>
+            <label>AOI file <input name="aoi" type="file" accept=".geojson,.json,.gpkg,.zip" required /></label>
+            <p class="hint">Accepted: GeoJSON, GeoPackage, or a ZIP containing all Shapefile parts. The AOI must already use the query CRS.</p>
             <div class="two-col">
               <label>CRS <input name="crs" type="text" value="EPSG:31982" required pattern="EPSG:\d+" /></label>
               <label>Resolution <input name="resolution" type="number" min="0.000001" step="any" value="1" required /></label>
             </div>
-            <label>Output GeoTIFF <input name="out" type="text" placeholder="C:\data\dsm_native.tif" required /></label>
+            <p class="hint">The output GeoTIFF will download automatically when processing succeeds.</p>
           </fieldset>
           <fieldset id="wms-options" hidden>
             <legend>3. WMS options</legend>
@@ -55,6 +57,14 @@
             </div>
             <label>Image format <select name="format"><option value="image/png">PNG</option><option value="image/jpeg">JPEG</option></select></label>
           </fieldset>
+          <fieldset id="wmts-options" hidden>
+            <legend>3. WMTS options</legend>
+            <label>Tile matrix set <input name="tileMatrixSet" type="text" placeholder="GoogleMapsCompatible" /></label>
+            <label>Zoom level <input name="zoomLevel" type="number" min="0" step="1" placeholder="14" /></label>
+            <p class="hint">Use values published by the WMTS GetCapabilities document. Leave blank to use the source defaults.</p>
+          </fieldset>
+          <button class="launch" type="submit">LANCER</button>
+          <p class="process-status" id="process-status" aria-live="polite">The calculation runs in Cloudflare. Keep this page open until the download starts.</p>
         </form>
         <a class="contact" href="mailto:adel.bchini@gmail.com">Contact</a>
         <section class="feedback" aria-labelledby="feedback-title">
@@ -67,7 +77,7 @@
             </label>
             <button type="submit">Send feedback</button>
           </form>
-          <p class="feedback-note" id="feedback-status">Your email app will open with the report pre-filled; you choose whether to send it.</p>
+          <p class="feedback-note" id="feedback-status" aria-live="polite">Reports are saved securely in this app’s Cloudflare database.</p>
         </section>
       </div>
     </main>

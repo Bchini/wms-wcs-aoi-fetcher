@@ -1,0 +1,40 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "wms-wcs-aoi-fetcher",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-09-19",
+  "assets": {
+    "directory": "./web",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "FEEDBACK_DB",
+      "database_name": "wms-wcs-aoi-feedback",
+      "database_id": "8fd34457-faac-4248-97c9-ef2f2ab5b299",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "containers": [
+    {
+      "class_name": "GdalProcessor",
+      "image": "./Dockerfile",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "GDAL_PROCESSOR",
+        "class_name": "GdalProcessor"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["GdalProcessor"]
+    }
+  ]
+}

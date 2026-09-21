@@ -4,3 +4,5 @@ tiles/
 *.part
 __pycache__/
 *.pyc
+node_modules/
+.wrangler/

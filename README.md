@@ -3,11 +3,15 @@
 Download a raster layer from a WMS or WCS service, clipped to an AOI, as a
 single GeoTIFF — without manually clicking through a web portal tile by tile.
 
-The repository also includes a lightweight **web command builder** in
-[`web/`](web/). It is deployable as a static Cloudflare Pages site and creates
-a checked command/script for the local Python + GDAL fetcher. A static site
-cannot run GDAL or download potentially large GeoTIFFs itself, so the actual
-fetch always remains on the user's machine.
+## Live Cloudflare interface
+
+**[Open the AOI Raster Fetcher](https://wms-wcs-aoi-fetcher.adel-bchini.workers.dev/)**
+
+The online interface lets users upload a GeoJSON, GeoPackage, or ZIP
+Shapefile AOI, select WCS, WMS, or WMTS, and press **LANCER**. Cloudflare runs
+GDAL in a container, clips the requested raster, and starts the GeoTIFF
+download when processing completes. Error reports are saved directly in the
+app's Cloudflare D1 database.
 
 Grew out of fetching a 1m DSM from a Brazilian state WMS/WCS server for one
 small area of interest, where downloading the whole state was never an
