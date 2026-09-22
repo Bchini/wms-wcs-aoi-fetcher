@@ -62,8 +62,15 @@ export async function notifyFeedback(env, { message, service, protocol }) {
         text: message,
       }),
     });
+    const responseText = await response.text();
     if (!response.ok) {
-      console.error("feedback email notification failed", response.status, await response.text());
+      console.error("feedback email notification failed", response.status, responseText);
+    } else {
+      // Resend accepting the request only means it queued for delivery, not
+      // that it reached the inbox (spam filtering, sender reputation for
+      // the shared onboarding@resend.dev domain, etc. happen after this) --
+      // logged so a "saved but never arrived" report can tell those apart.
+      console.log("feedback email notification accepted by Resend", responseText);
     }
   } catch (error) {
     console.error("feedback email notification failed", error);
