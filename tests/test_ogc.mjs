@@ -7,6 +7,7 @@ import {
   serviceUrl,
   tileGrid,
   planWmsTiles,
+  resolutionOptions,
 } from '../web/ogc.js';
 
 test('wmsBbox: WMS 1.3 EPSG:4326 uses latitude first', () => {
@@ -73,4 +74,41 @@ test('planWmsTiles: multiple tiles partition the extent without gaps or overlap'
   assert.equal(tiles[0].txmax, 10);
   assert.equal(tiles[1].txmin, 10);
   assert.equal(tiles[1].txmax, 20);
+});
+
+test('resolutionOptions: a small area offers every preset, finest first is sharper', () => {
+  const options = resolutionOptions([0, 0, 1, 1]);
+  assert.ok(options.length >= 2);
+  // Each subsequent preset should be equal-or-finer (smaller resolution
+  // value = more pixels) than the previous one.
+  for (let i = 1; i < options.length; i += 1) {
+    assert.ok(options[i].resolution <= options[i - 1].resolution);
+  }
+  const standard = options.find((o) => o.label === 'Standard');
+  assert.ok(standard);
+  assert.equal(Math.max(standard.width, standard.height), 2048);
+});
+
+test('resolutionOptions: an enormous area still returns at least one option within budget', () => {
+  // A full-continent-scale bbox in degrees -- Standard/High/Maximum would
+  // all blow the pixel budget at naive presets, Preview should still fit.
+  const options = resolutionOptions([-180, -90, 180, 90]);
+  assert.ok(options.length >= 1);
+  for (const option of options) {
+    assert.ok(option.width * option.height <= 25_000_000);
+  }
+});
+
+test('resolutionOptions: never proposes more tiles than the WMS tile cap', () => {
+  const options = resolutionOptions([-19, 27, 5, 44], { maxTiles: 64, tileSize: 1024 });
+  for (const option of options) {
+    assert.ok(option.tiles <= 64);
+  }
+});
+
+test('resolutionOptions: always returns at least one option, even in a pathological case', () => {
+  const options = resolutionOptions([-1e7, -1e7, 1e7, 1e7], { maxPixels: 100 });
+  assert.equal(options.length, 1);
+  assert.equal(options[0].label, 'Maximum (capped)');
+  assert.ok(options[0].width * options[0].height <= 100 * 4); // rounding slack
 });

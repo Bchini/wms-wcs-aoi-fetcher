@@ -7,7 +7,7 @@ single GeoTIFF — without manually clicking through a web portal tile by tile.
 
 **[Open the AOI Raster Fetcher](https://wms-wcs-aoi-fetcher.adel-bchini.workers.dev/)**
 
-Paste a WMS or WCS URL and press **RUN**. That's the whole interface —
+Paste a WMS or WCS URL and press **DETECT**. That's the whole interface —
 everything else is detected automatically:
 
 - **Service and version** — from a `SERVICE=`/`VERSION=` parameter if the URL
@@ -16,11 +16,16 @@ everything else is detected automatically:
 - **Layer** — from `LAYERS=`/`COVERAGE=`/etc. if given, else the first
   georeferenced layer the service advertises.
 - **CRS** — from `CRS=`/`SRS=` if given, else `EPSG:4326`.
-- **Area and resolution** — a full GetMap/GetCoverage URL's `BBOX` (and
-  `WIDTH`/`HEIGHT`, if present) is used exactly as given, so pasting a request
-  you copied out of a browser's network tab clips precisely that view. A bare
-  endpoint or GetCapabilities link instead fetches the layer's full advertised
-  extent, sized to roughly 2048 px on the longer side.
+- **Area** — a full GetMap/GetCoverage URL's `BBOX` is used exactly as given,
+  so pasting a request you copied out of a browser's network tab clips
+  precisely that view. A bare endpoint or GetCapabilities link instead fetches
+  the layer's full advertised extent.
+
+DETECT shows the detected service/layer/CRS and a **resolution dropdown**
+(Preview/Standard/High/Maximum) sized off that specific area — a full-country
+extent and a small neighborhood get very different pixel-dimension options,
+each capped so it stays within the 25-million-pixel budget and, for WMS,
+within 64 tiles. Pick one and press **DOWNLOAD GEOTIFF**.
 
 **The actual clip/mosaic/reproject runs entirely in your browser**, via
 [gdal3.js](https://github.com/bugra9/gdal3.js) (real GDAL compiled to

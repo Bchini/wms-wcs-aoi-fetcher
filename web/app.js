@@ -1,10 +1,13 @@
-import { wmsBbox, wmsCrsParameter, serviceUrl, planWmsTiles } from './ogc.js';
+import { wmsBbox, wmsCrsParameter, serviceUrl, planWmsTiles, resolutionOptions } from './ogc.js';
 import { runWcs, runWms } from './gdal-runner.js';
 
 const form = document.querySelector('#fetch-form');
 const urlField = document.querySelector('#service-url');
+const detectedPanel = document.querySelector('#detected-panel');
+const detectedSummary = document.querySelector('#detected-summary');
+const resolutionSelect = document.querySelector('#resolution-select');
 const processStatus = document.querySelector('#process-status');
-const launchButton = form.querySelector('.launch');
+const launchButton = document.querySelector('#launch-button');
 const progressTrack = document.querySelector('#progress-track');
 const progressFill = document.querySelector('#progress-fill');
 const feedbackForm = document.querySelector('#feedback-form');
@@ -13,6 +16,27 @@ const feedbackStatus = document.querySelector('#feedback-status');
 const feedbackButton = feedbackForm.querySelector('button[type="submit"]');
 
 const WMS_TILE_SIZE = 1024;
+const DEFAULT_STATUS = "Paste a link and press DETECT to see the layer and choose a resolution.";
+
+// The form works in two steps: DETECT calls /api/resolve and shows a
+// resolution dropdown sized to the area's own extent (the fix for a full-
+// country request defaulting to a coarse resolution); DOWNLOAD then runs
+// GDAL with whichever resolution was chosen. Editing the URL after
+// detecting resets back to step one, since a different URL may resolve to
+// a different area entirely.
+let detected = null; // the last /api/resolve() result
+let detectedForUrl = null; // the URL string it was resolved from
+
+function resetDetection() {
+  detected = null;
+  detectedForUrl = null;
+  detectedPanel.hidden = true;
+  launchButton.textContent = 'DETECT';
+  processStatus.textContent = DEFAULT_STATUS;
+}
+urlField.addEventListener('input', () => {
+  if (urlField.value.trim() !== detectedForUrl) resetDetection();
+});
 
 // Best-effort client-side read of SERVICE/VERSION from the pasted URL, purely
 // to label a feedback report — /api/resolve does its own, authoritative
@@ -82,22 +106,52 @@ function triggerDownload(blob, filename) {
   URL.revokeObjectURL(downloadUrl);
 }
 
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  if (!form.checkValidity()) {
-    form.reportValidity();
-    return;
+function populateResolutionSelect(resolved) {
+  const options = resolutionOptions(resolved.bounds, { tileSize: WMS_TILE_SIZE });
+  resolutionSelect.innerHTML = '';
+  for (const option of options) {
+    const el = document.createElement('option');
+    el.value = String(option.resolution);
+    const dims = `${option.width} × ${option.height} px`;
+    const extra = resolved.service === 'wms' && option.tiles > 1 ? ` · ${option.tiles} tiles` : '';
+    el.textContent = `${option.label} — ${dims}${extra}`;
+    if (option.label === 'Standard') el.selected = true;
+    resolutionSelect.appendChild(el);
   }
+  // Standard may have been dropped (e.g. an enormous full-extent area) --
+  // fall back to whatever the list's last (coarsest-that-fits) entry is.
+  if (!resolutionSelect.value && resolutionSelect.options.length) {
+    resolutionSelect.selectedIndex = resolutionSelect.options.length - 1;
+  }
+}
 
-  const url = urlField.value.trim();
+async function detect(url) {
   launchButton.disabled = true;
-  launchButton.textContent = 'RUNNING…';
+  launchButton.textContent = 'DETECTING…';
   processStatus.textContent = 'Detecting the service, layer, and area…';
-  showProgress();
   try {
     const resolved = await resolveUrl(url);
-    setProgress(5);
+    detected = resolved;
+    detectedForUrl = url;
+    populateResolutionSelect(resolved);
+    detectedPanel.hidden = false;
+    detectedSummary.textContent =
+      `${resolved.service.toUpperCase()} · ${resolved.layer} · ${resolved.crs}`;
+    processStatus.textContent = 'Choose a resolution, then press DOWNLOAD GEOTIFF.';
+    launchButton.textContent = 'DOWNLOAD GEOTIFF';
+  } catch (error) {
+    processStatus.textContent = `Could not detect this URL: ${error.message}`;
+    launchButton.textContent = 'DETECT';
+  } finally {
+    launchButton.disabled = false;
+  }
+}
 
+async function runDownload(resolved, resolution) {
+  launchButton.disabled = true;
+  launchButton.textContent = 'RUNNING…';
+  showProgress();
+  try {
     let blob;
     if (resolved.service === 'wcs') {
       processStatus.textContent = `Fetching ${resolved.layer} (WCS) and clipping in your browser…`;
@@ -109,19 +163,19 @@ form.addEventListener('submit', async (event) => {
         crs: resolved.crs,
         response_crs: resolved.crs,
         bbox: resolved.bounds.join(','),
-        resx: String(resolved.resolution),
-        resy: String(resolved.resolution),
+        resx: String(resolution),
+        resy: String(resolution),
         format: 'GeoTIFF',
       };
       blob = await runWcs(
-        { url: serviceUrl(resolved.endpoint, params), bounds: resolved.bounds, resolution: resolved.resolution, crs: resolved.crs },
+        { url: serviceUrl(resolved.endpoint, params), bounds: resolved.bounds, resolution, crs: resolved.crs },
         updateProgress
       );
     } else {
       const [minx, miny, maxx, maxy] = resolved.bounds;
       const tiles = planWmsTiles({
         minx, miny, maxx, maxy,
-        tileW: WMS_TILE_SIZE, tileH: WMS_TILE_SIZE, resolution: resolved.resolution,
+        tileW: WMS_TILE_SIZE, tileH: WMS_TILE_SIZE, resolution,
       }).map((tile) => ({
         ...tile,
         url: serviceUrl(resolved.endpoint, {
@@ -139,7 +193,7 @@ form.addEventListener('submit', async (event) => {
       }));
       processStatus.textContent = `Fetching ${tiles.length} tile${tiles.length > 1 ? 's' : ''} from ${resolved.layer} (WMS) and mosaicking in your browser…`;
       blob = await runWms(
-        { tiles, bounds: resolved.bounds, resolution: resolved.resolution, crs: resolved.crs },
+        { tiles, bounds: resolved.bounds, resolution, crs: resolved.crs },
         updateProgress
       );
     }
@@ -152,7 +206,21 @@ form.addEventListener('submit', async (event) => {
     finishProgress(false);
   } finally {
     launchButton.disabled = false;
-    launchButton.textContent = 'RUN';
+    launchButton.textContent = 'DOWNLOAD GEOTIFF';
+  }
+}
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!form.checkValidity()) {
+    form.reportValidity();
+    return;
+  }
+  const url = urlField.value.trim();
+  if (detected && detectedForUrl === url) {
+    await runDownload(detected, Number(resolutionSelect.value));
+  } else {
+    await detect(url);
   }
 });
 

@@ -14,6 +14,10 @@ label { display:block; font-weight:650; }
 .url-field input { font-size:1.05rem; }
 input { display:block; width:100%; margin-top:6px; padding:13px 14px; color:var(--ink); border:1px solid #bfc6bd; border-radius:8px; background:#fff; font:inherit; } input:focus { outline:3px solid #d7f55f; border-color:var(--green); }
 .hint { margin:8px 0 0; color:var(--muted); font-size:.85rem; }
+.detected { margin-top:18px; padding:16px 18px; border-radius:10px; background:#e3eee5; }
+.detected-summary { margin:0; font-weight:700; color:var(--green); }
+.detected select { margin-top:6px; }
+select { display:block; width:100%; padding:11px 12px; color:var(--ink); border:1px solid #bfc6bd; border-radius:8px; background:#fff; font:inherit; } select:focus { outline:3px solid #d7f55f; border-color:var(--green); }
 .launch { width:100%; margin-top:18px; padding:14px 18px; border:0; border-radius:9px; background:var(--green); color:#fff; cursor:pointer; font:inherit; font-weight:900; letter-spacing:.08em; }.launch:hover, .launch:focus { background:#0f3d33; }.launch:disabled { cursor:wait; opacity:.65; }.process-status { margin:12px 0 0; color:var(--muted); font-size:.9rem; }
 .progress-track { height:8px; margin-top:14px; overflow:hidden; border-radius:999px; background:#e3ded0; }
 .progress-fill { height:100%; width:0%; border-radius:999px; background:linear-gradient(90deg, var(--green), var(--lime)); transition:width .35s ease-out; }

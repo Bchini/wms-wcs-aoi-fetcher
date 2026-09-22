@@ -22,11 +22,18 @@
             <input id="service-url" name="url" type="url" placeholder="https://server.example.org/geoserver/wms?request=GetCapabilities" required />
           </label>
           <p class="hint">Works with WMS or WCS. Give it a full GetMap/GetCoverage URL to clip exactly that BBOX, or just an endpoint to fetch the first layer's full extent.</p>
-          <button class="launch" type="submit">RUN</button>
+          <div class="detected" id="detected-panel" hidden>
+            <p class="detected-summary" id="detected-summary"></p>
+            <label>Resolution
+              <select id="resolution-select" name="resolution"></select>
+            </label>
+            <p class="hint" id="resolution-hint">Sized to this area — a small AOI can go much sharper than a full country extent.</p>
+          </div>
+          <button class="launch" type="submit" id="launch-button">DETECT</button>
           <div class="progress-track" id="progress-track" hidden>
             <div class="progress-fill" id="progress-fill" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Processing progress"></div>
           </div>
-          <p class="process-status" id="process-status" aria-live="polite">Paste a link and press RUN. The GeoTIFF downloads automatically when it's ready.</p>
+          <p class="process-status" id="process-status" aria-live="polite">Paste a link and press DETECT to see the layer and choose a resolution.</p>
         </form>
         <a class="contact" href="mailto:adel.bchini@gmail.com">Contact</a>
         <section class="feedback" aria-labelledby="feedback-title">
