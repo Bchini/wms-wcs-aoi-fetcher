@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { interpretUrl, ResolveError } from '../src/resolve.mjs';
+import { interpretUrl, ResolveError, reprojectBounds, lonLatToWebMercator } from '../src/resolve.mjs';
 
 const WMS_CAPABILITIES = `<?xml version="1.0"?>
 <WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms">
@@ -120,4 +120,66 @@ test('surrounding whitespace is stripped from the endpoint', async () => {
     fetchImpl
   );
   assert.equal(resolved.endpoint, 'https://example.test/wms');
+});
+
+// A layer that only advertises a geographic fallback (no BoundingBox in the
+// requested CRS at all) -- the regression this guards against: those
+// geographic degrees must never be reused as-is for a non-4326 request.
+const GEOGRAPHIC_ONLY_CAPABILITIES = `<?xml version="1.0"?>
+<WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms">
+  <Service><Name>WMS</Name></Service>
+  <Capability>
+    <Layer>
+      <Layer>
+        <Name>demo:geo_only</Name>
+        <EX_GeographicBoundingBox>
+          <westBoundLongitude>-10</westBoundLongitude>
+          <eastBoundLongitude>10</eastBoundLongitude>
+          <southBoundLatitude>30</southBoundLatitude>
+          <northBoundLatitude>50</northBoundLatitude>
+        </EX_GeographicBoundingBox>
+      </Layer>
+    </Layer>
+  </Capability>
+</WMS_Capabilities>`;
+
+test('requesting EPSG:3857 against geographic-only capabilities reprojects, never reuses degrees as meters', async () => {
+  const fetchImpl = fakeFetch({ wms: GEOGRAPHIC_ONLY_CAPABILITIES });
+  const resolved = await interpretUrl(
+    'https://example.test/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
+      '&LAYERS=demo:geo_only&CRS=EPSG:3857',
+    fetchImpl
+  );
+  assert.equal(resolved.crs, 'EPSG:3857');
+  const [expMinX, expMinY] = lonLatToWebMercator(-10, 30);
+  const [expMaxX, expMaxY] = lonLatToWebMercator(10, 50);
+  assert.ok(Math.abs(resolved.bounds[0] - expMinX) < 1);
+  assert.ok(Math.abs(resolved.bounds[1] - expMinY) < 1);
+  assert.ok(Math.abs(resolved.bounds[2] - expMaxX) < 1);
+  assert.ok(Math.abs(resolved.bounds[3] - expMaxY) < 1);
+  // The old bug: bounds like [-10, 30, 10, 50] reused directly as "meters".
+  assert.notEqual(resolved.bounds[0], -10);
+});
+
+test('requesting a CRS with no known transform falls back to the CRS the bounds are actually valid in', async () => {
+  const fetchImpl = fakeFetch({ wms: GEOGRAPHIC_ONLY_CAPABILITIES });
+  const resolved = await interpretUrl(
+    'https://example.test/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
+      '&LAYERS=demo:geo_only&CRS=EPSG:31982',
+    fetchImpl
+  );
+  // Cannot reproject degrees to a UTM-style CRS with a closed-form formula --
+  // must report the CRS the bounds actually are in (EPSG:4326), not pretend
+  // they are EPSG:31982 meters.
+  assert.equal(resolved.crs, 'EPSG:4326');
+  assert.deepEqual(resolved.bounds, [-10, 30, 10, 50]);
+});
+
+test('reprojectBounds returns null for an unsupported CRS pair', () => {
+  assert.equal(reprojectBounds([-10, 30, 10, 50], 'EPSG:4326', 'EPSG:31982'), null);
+});
+
+test('reprojectBounds is a no-op when source and target CRS already match', () => {
+  const bounds = [-10, 30, 10, 50];
+  assert.deepEqual(reprojectBounds(bounds, 'EPSG:4326', 'epsg:4326'), bounds);
 });

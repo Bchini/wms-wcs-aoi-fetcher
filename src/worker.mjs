@@ -159,6 +159,50 @@ function blockedProxyHost(hostname) {
   return false;
 }
 
+/**
+ * Wrap `readable` so it errors out once more than `maxBytes` has been
+ * enqueued. A Content-Length header check alone (the previous approach) does
+ * nothing for a chunked/unknown-length response -- it defaults to 0, which
+ * is never ">" the cap, so the whole body streamed through unbounded. This
+ * enforces the cap on the actual bytes seen, regardless of what headers (or
+ * lack thereof) the source server sent. `onSettled` fires exactly once, on
+ * close/error/cancel, so callers can release resources (e.g. a timeout) tied
+ * to the stream's lifetime instead of just its headers arriving.
+ */
+export function limitStream(readable, maxBytes, onSettled) {
+  const reader = readable.getReader();
+  let seen = 0;
+  let settled = false;
+  const settle = () => {
+    if (!settled) {
+      settled = true;
+      onSettled?.();
+    }
+  };
+  return new ReadableStream({
+    async pull(controller) {
+      const { done, value } = await reader.read();
+      if (done) {
+        settle();
+        controller.close();
+        return;
+      }
+      seen += value.byteLength;
+      if (seen > maxBytes) {
+        settle();
+        controller.error(new Error("Response exceeded the proxy size limit"));
+        await reader.cancel().catch(() => {});
+        return;
+      }
+      controller.enqueue(value);
+    },
+    cancel(reason) {
+      settle();
+      return reader.cancel(reason);
+    },
+  });
+}
+
 async function proxyRequest(request) {
   if (request.method !== "GET") return json({ error: "Method not allowed" }, 405);
   if (!sameOrigin(request)) return json({ error: "Invalid origin" }, 403);
@@ -180,6 +224,10 @@ async function proxyRequest(request) {
   }
 
   const controller = new AbortController();
+  // Left running for the whole streamed response, not just until headers
+  // arrive: aborting this later also tears down an in-flight body read, so
+  // it doubles as a guard against a source server that sends headers
+  // promptly but then trickles the body forever.
   const timeout = setTimeout(() => controller.abort(), PROXY_TIMEOUT_MS);
   let upstream;
   try {
@@ -188,21 +236,29 @@ async function proxyRequest(request) {
       signal: controller.signal,
     });
   } catch (error) {
-    return json({ error: `Could not reach the source server: ${error.message}` }, 502);
-  } finally {
     clearTimeout(timeout);
+    return json({ error: `Could not reach the source server: ${error.message}` }, 502);
   }
 
   if (!upstream.ok) {
+    clearTimeout(timeout);
     return json({ error: `The source server returned HTTP ${upstream.status}.` }, 502);
   }
+  // A present, oversized Content-Length can be rejected before reading
+  // anything; its absence (e.g. chunked transfer-encoding) must NOT be
+  // treated as "size 0" -- limitStream() below enforces the real cap either
+  // way, this is just a fast path when the size is already known upfront.
   const contentLength = Number(upstream.headers.get("content-length") || 0);
   if (contentLength > MAX_PROXY_BYTES) {
+    clearTimeout(timeout);
+    controller.abort();
     return json({ error: "The source server's response is too large to proxy." }, 413);
   }
 
   const contentType = upstream.headers.get("content-type") || "application/octet-stream";
-  return new Response(upstream.body, {
+  const body = upstream.body ? limitStream(upstream.body, MAX_PROXY_BYTES, () => clearTimeout(timeout)) : null;
+  if (!body) clearTimeout(timeout);
+  return new Response(body, {
     status: 200,
     headers: { "content-type": contentType, "cache-control": "no-store" },
   });

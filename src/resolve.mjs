@@ -42,6 +42,40 @@ function guessServiceFromPath(url) {
   return null;
 }
 
+// The container-based version of this app reprojected a mismatched CRS via
+// a `gdaltransform` subprocess; the Worker has no GDAL to call. Web Mercator
+// is common enough (basemap-style WMS layers) to warrant a closed-form
+// formula so that specific case still gets pixel-exact bounds in the
+// requested CRS; anything else falls back to adopting the CRS the bounds
+// are actually valid in (see interpretUrl() below) rather than silently
+// treating geographic degrees as if they were the requested CRS's own units
+// (the bug: a geographic-only capabilities fallback used as-is for a
+// request that asked for e.g. EPSG:3857 turns degrees into "meters",
+// collapsing the area to a sliver near 0,0).
+const WEB_MERCATOR_RADIUS = 6378137;
+
+export function lonLatToWebMercator(lon, lat) {
+  const x = (lon * Math.PI) / 180 * WEB_MERCATOR_RADIUS;
+  const y = Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) * WEB_MERCATOR_RADIUS;
+  return [x, y];
+}
+
+/**
+ * Reproject [minx, miny, maxx, maxy] from `fromCrs` to `toCrs` if a
+ * closed-form transform is known; returns null if not (the caller then
+ * adopts fromCrs instead of mislabeling the bounds).
+ */
+export function reprojectBounds(bounds, fromCrs, toCrs) {
+  if (fromCrs.toUpperCase() === toCrs.toUpperCase()) return bounds;
+  if (fromCrs.toUpperCase() === 'EPSG:4326' && toCrs.toUpperCase() === 'EPSG:3857') {
+    const [minx, miny, maxx, maxy] = bounds;
+    const [x1, y1] = lonLatToWebMercator(minx, miny);
+    const [x2, y2] = lonLatToWebMercator(maxx, maxy);
+    return [x1, y1, x2, y2];
+  }
+  return null;
+}
+
 function pixelCount(bounds, resolution) {
   const [minx, miny, maxx, maxy] = bounds;
   return ((maxx - minx) / resolution) * ((maxy - miny) / resolution);
@@ -201,7 +235,20 @@ export async function interpretUrl(rawUrl, fetchImpl) {
 
   if (!bounds) {
     const found = await advertisedBounds(fetchImpl, service, endpoint, layer, version, crs);
-    bounds = found.bounds;
+    const reprojected = reprojectBounds(found.bounds, found.crs, crs);
+    if (reprojected) {
+      bounds = reprojected;
+      // crs is already correct: reprojectBounds() only returns non-null
+      // when it actually converted into it.
+    } else {
+      // No way to convert the advertised bounds into the requested CRS --
+      // adopt the CRS they're actually valid in instead of mislabeling
+      // geographic degrees as e.g. EPSG:3857 meters. bounds and crs stay
+      // consistent, which is what every downstream GetMap/GetCoverage
+      // request and the final GeoTIFF's georeferencing depend on.
+      bounds = found.bounds;
+      crs = found.crs;
+    }
   }
 
   const [minx, miny, maxx, maxy] = bounds;
