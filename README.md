@@ -36,7 +36,8 @@ keeps the whole app on Cloudflare's **free** Workers plan (Cloudflare
 Containers, which the previous server-side-GDAL version of this app used,
 requires the paid plan). The progress bar reflects real tiles fetched/warped,
 not a fake timer. Error reports are saved in the app's Cloudflare D1
-database. Every request is capped at 25 million output pixels.
+database and (if configured, see below) trigger an email notification. Every
+request is capped at 25 million output pixels.
 
 Because GDAL now runs client-side, **WMTS isn't supported** (its tile-matrix
 math isn't implemented in the browser runner, and `fetch.py` never supported
@@ -95,6 +96,31 @@ src/resolve.mjs, xml.mjs     →  interpret the pasted URL (no GDAL needed)
    send CORS headers; it does not process anything, just relays bytes past
    the browser's cross-origin restrictions (same-origin `Sec-Fetch-Site`
    checked, private/loopback hosts rejected, 80 MB cap, 60 s timeout).
+
+## Feedback notifications
+
+The feedback form always saves to the `feedback` D1 table (`migrations/`) —
+after deploying for the first time, apply it once with:
+
+```bash
+npx wrangler d1 migrations apply wms-wcs-aoi-feedback --remote
+```
+
+Without that, `/api/feedback` returns a 503 and nothing is saved (this bit
+the first deploy of this app: the table simply didn't exist yet). An email
+notification on top of that is optional and needs two things: `NOTIFY_EMAIL`
+(the destination, already set as a plain var in `wrangler.jsonc`) and
+`RESEND_API_KEY` (a [Resend](https://resend.com) API key, kept as a secret,
+never committed):
+
+```bash
+npx wrangler secret put RESEND_API_KEY
+```
+
+Resend's free tier (100 emails/day) needs no domain of your own — it sends
+from the shared `onboarding@resend.dev` address, which works for a
+low-volume notification like this. Leaving the secret unset just means no
+email goes out; the D1 row is still saved either way.
 
 ## Requirements
 

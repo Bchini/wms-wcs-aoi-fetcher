@@ -39,7 +39,38 @@ function sameOrigin(request) {
   return !site || site === "same-origin" || site === "none";
 }
 
-async function saveFeedback(request, env) {
+// Best-effort notification email via Resend (https://resend.com) -- a
+// transactional email API chosen specifically because it needs no domain of
+// our own: RESEND_API_KEY (a Worker secret) can send from the shared
+// onboarding@resend.dev address to the account's own verified inbox with no
+// DNS setup. Both RESEND_API_KEY and NOTIFY_EMAIL are optional: if either is
+// unset this silently does nothing, so feedback still saves to D1 either
+// way -- the email is a convenience, never a requirement for the feature.
+export async function notifyFeedback(env, { message, service, protocol }) {
+  if (!env.RESEND_API_KEY || !env.NOTIFY_EMAIL) return;
+  try {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${env.RESEND_API_KEY}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        from: "AOI Raster Fetcher <onboarding@resend.dev>",
+        to: [env.NOTIFY_EMAIL],
+        subject: `New feedback — ${service.toUpperCase()} ${protocol}`,
+        text: message,
+      }),
+    });
+    if (!response.ok) {
+      console.error("feedback email notification failed", response.status, await response.text());
+    }
+  } catch (error) {
+    console.error("feedback email notification failed", error);
+  }
+}
+
+async function saveFeedback(request, env, ctx) {
   if (request.method !== "POST") return json({ error: "Method not allowed" }, 405);
   if (!sameOrigin(request)) return json({ error: "Invalid origin" }, 403);
   if (!request.headers.get("content-type")?.includes("application/json")) {
@@ -73,6 +104,11 @@ async function saveFeedback(request, env) {
     console.error("feedback insert failed", error);
     return json({ error: "Feedback could not be saved" }, 503);
   }
+  // The D1 row above is what actually matters and is already saved; the
+  // notification email is a convenience, so it runs after the response is
+  // sent (waitUntil) instead of making the reporter wait on it, and never
+  // turns a successful save into an error if it fails.
+  ctx.waitUntil(notifyFeedback(env, { message, service, protocol }));
   return json({ ok: true }, 201);
 }
 
@@ -173,9 +209,9 @@ async function proxyRequest(request) {
 }
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
-    if (url.pathname === "/api/feedback") return saveFeedback(request, env);
+    if (url.pathname === "/api/feedback") return saveFeedback(request, env, ctx);
     if (url.pathname === "/api/resolve") return resolveService(request);
     if (url.pathname === "/api/proxy") return proxyRequest(request);
     if (url.pathname.startsWith("/api/")) return json({ error: "Not found" }, 404);

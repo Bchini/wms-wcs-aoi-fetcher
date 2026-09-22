@@ -16,6 +16,15 @@
       "migrations_dir": "migrations"
     }
   ],
+  // NOTIFY_EMAIL is the destination for feedback notifications (see
+  // notifyFeedback() in src/worker.mjs) -- not secret, just a plain address.
+  // The other half, RESEND_API_KEY, is a secret and is NOT set here; set it
+  // once with `npx wrangler secret put RESEND_API_KEY` (get the key from
+  // https://resend.com/api-keys). Feedback still saves fine without either
+  // -- the email is a convenience, not a requirement.
+  "vars": {
+    "NOTIFY_EMAIL": "adel.bchini@gmail.com"
+  },
   // Cloudflare tracks Durable Object classes at the account level, tied to
   // this script, independent of whether the class is still declared above.
   // Simply removing the old "containers"/"durable_objects" blocks (and the
