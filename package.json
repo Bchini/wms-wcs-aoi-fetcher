@@ -1,5 +1,5 @@
 {
-  "name": "wms-wcs-aoi-fetcher",
+  "name": "wms-fetcher",
   "private": true,
   "type": "module",
   "scripts": {
