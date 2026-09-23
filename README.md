@@ -1,143 +1,117 @@
 # wms-wcs-aoi-fetcher
 
-Download a raster layer from a WMS or WCS service, clipped to an AOI, as a
-single GeoTIFF — without manually clicking through a web portal tile by tile.
+[![CI](https://github.com/Bchini/wms-wcs-aoi-fetcher/actions/workflows/ci.yml/badge.svg)](https://github.com/Bchini/wms-wcs-aoi-fetcher/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Download a raster layer from a WMS or WCS service, clip it to an AOI, and export the result as a single GeoTIFF without manually clicking through a web portal tile by tile.
+
+This project was built for cases where a full national or regional raster is too large to download, but a small area of interest still needs to be extracted cleanly and reproducibly.
+
+## Project overview
+
+The repository includes two complementary execution paths:
+
+- a local CLI built in Python with GDAL (`fetch.py`), for direct command-line use in a desktop or server environment,
+- a browser-based web app running in Cloudflare Workers, powered by `gdal3.js` in WebAssembly, for lighter infrastructure and no dedicated GDAL server.
+
+Both paths follow the same overall workflow:
+
+1. identify the OGC service and layer,
+2. detect or infer the CRS and bounds,
+3. compute an appropriate output resolution,
+4. fetch the raster data,
+5. clip it against the AOI,
+6. export a final GeoTIFF.
 
 ## Live Cloudflare interface
 
-**[Open the AOI Raster Fetcher](https://wms-wcs-aoi-fetcher.adel-bchini.workers.dev/)**
+Open the app here:
 
-Paste a WMS or WCS URL and press **DETECT**. That's the whole interface —
-everything else is detected automatically:
+**[AOI Raster Fetcher](https://wms-wcs-aoi-fetcher.adel-bchini.workers.dev/)**
 
-- **Service and version** — from a `SERVICE=`/`VERSION=` parameter if the URL
-  has one, else guessed from the path (`.../wms`, `.../wcs`), else found by
-  probing GetCapabilities for each in turn.
-- **Layer** — from `LAYERS=`/`COVERAGE=`/etc. if given, else the first
-  georeferenced layer the service advertises.
-- **CRS** — from `CRS=`/`SRS=` if given, else `EPSG:4326`.
-- **Area** — a full GetMap/GetCoverage URL's `BBOX` is used exactly as given,
-  so pasting a request you copied out of a browser's network tab clips
-  precisely that view. A bare endpoint or GetCapabilities link instead fetches
-  the layer's full advertised extent.
+Paste a WMS or WCS URL and press **DETECT**. The interface tries to infer everything automatically:
 
-DETECT shows the detected service/layer/CRS and a **resolution dropdown**
-(Preview/Standard/High/Maximum) sized off that specific area — a full-country
-extent and a small neighborhood get very different pixel-dimension options,
-each capped so it stays within the 25-million-pixel budget and, for WMS,
-within 64 tiles. Pick one and press **DOWNLOAD GEOTIFF**.
+- service and version from `SERVICE=` / `VERSION=` parameters, or by guessing from the endpoint path,
+- layer from `LAYERS=` / `COVERAGE=` / other OGC identifiers,
+- CRS from `CRS=` / `SRS=` or defaulting to `EPSG:4326`,
+- extent from a literal `BBOX` or from the service's advertised capabilities.
 
-**The actual clip/mosaic/reproject runs entirely in your browser**, via
-[gdal3.js](https://github.com/bugra9/gdal3.js) (real GDAL compiled to
-WebAssembly) — the Cloudflare Worker only resolves the URL (`/api/resolve`)
-and proxies the raw WMS/WCS bytes past the source server's CORS policy
-(`/api/proxy`); it never touches the raster itself. That's deliberate: it
-keeps the whole app on Cloudflare's **free** Workers plan (Cloudflare
-Containers, which the previous server-side-GDAL version of this app used,
-requires the paid plan). The progress bar reflects real tiles fetched/warped,
-not a fake timer. Error reports are saved in the app's Cloudflare D1
-database and (if configured, see below) trigger an email notification. Every
-request is capped at 25 million output pixels.
-
-Because GDAL now runs client-side, **WMTS isn't supported** (its tile-matrix
-math isn't implemented in the browser runner, and `fetch.py` never supported
-it either) — use a WMS/WCS endpoint if the server offers one.
-
-Grew out of fetching a 1m DSM from a Brazilian state WMS/WCS server for one
-small area of interest, where downloading the whole state was never an
-option.
+The app then proposes resolution presets sized for the actual area selected, keeping the request under the configured pixel and tile budgets.
 
 ## Why WCS vs WMS matters
 
-- **WCS** (`--service wcs`) returns the *native pixel values* of a coverage
-  (e.g. `Float32` elevation). Use it whenever you need real numbers —
-  altitude, slope, hillshade, statistics.
-- **WMS** (`--service wms`) returns a *rendered image* (RGB/PNG) of the
-  layer, tiled and mosaicked here since WMS servers cap request size. Fine
-  for a visual basemap or preview, but the pixel values are colors, not
-  elevation — don't run terrain analysis on a WMS mosaic.
+- **WCS** (`--service wcs`) returns the native pixel values of a coverage (for example `Float32` elevation data). It is the correct choice whenever you want to compute on the data itself.
+- **WMS** (`--service wms`) returns a rendered image, usually tile-based and mosaicked after the fact. It is useful for map previews or visual basemaps, but pixel values are colors and not raw terrain values.
 
-If a server exposes both, prefer WCS for anything you intend to compute on.
+If a server exposes both protocols, prefer WCS for quantitative analysis.
 
-## CLI vs. the web app
+## Features
 
-The URL auto-detection above is a feature of the web app's Worker
-(`src/resolve.mjs`, `interpretUrl()`), not of `fetch.py` itself — the CLI
-below still takes explicit `--service`/`--layer`/`--crs`/`--aoi` flags, since
-it has no notion of "the URL you pasted," only the fields you pass it. The two
-are otherwise independent: the CLI runs local GDAL binaries over a real AOI
-file, the web app runs gdal3.js (WASM) in the browser over a BBOX.
+- WMS and WCS support,
+- AOI clipping from any GDAL/OGR-readable vector dataset,
+- WMS tiling and mosaicking,
+- WCS single GetCoverage fetch for native values,
+- browser-side processing with gdal3.js,
+- protected pixel budgets and tile caps,
+- clean error handling and resumable WMS tile caches,
+- automatic detection of OGC service metadata.
+
+## CLI vs web app
+
+The auto-detection logic is part of the web worker (`src/resolve.mjs` and related files), not of the Python CLI itself. The CLI still expects explicit values like `--service`, `--layer`, `--crs`, and `--aoi` because it works from concrete inputs rather than a pasted URL.
+
+The two flows are otherwise independent:
+
+- CLI: local GDAL binaries over a real AOI file,
+- web app: browser-side GDAL via WebAssembly over a BBOX.
 
 ## Web app architecture
 
-```
-web/index.html, app.js   →  UI + orchestration
-web/ogc.js                  →  BBOX/tile-grid math shared with fetch.py's logic
-web/gdal-runner.js           →  loads gdal3.js, runs gdalwarp/gdal_translate
-src/worker.mjs               →  routes /api/*, serves static assets
-src/resolve.mjs, xml.mjs     →  interpret the pasted URL (no GDAL needed)
+```text
+web/index.html, app.js        → UI + orchestration
+web/ogc.js                   → BBOX / tile-grid logic shared with the CLI
+web/gdal-runner.js            → loads gdal3.js and runs GDAL operations
+src/worker.mjs                → routes /api/* and serves static assets
+src/resolve.mjs, xml.mjs      → detect and interpret pasted URLs
 ```
 
-1. The browser POSTs the pasted URL to `/api/resolve`. The Worker fetches and
-   parses GetCapabilities (`fast-xml-parser`) if needed and returns the
-   resolved service/layer/CRS/bounds/resolution — no raster bytes involved.
-2. For **WCS**, the browser fetches the single GetCoverage response through
-   `/api/proxy` and runs one `gdalwarp -te ... -tr ... -t_srs ...` in WASM.
-3. For **WMS**, the browser fetches each GetMap tile through `/api/proxy`,
-   georeferences it (`gdal_translate -a_srs -a_ullr`), and warps it onto the
-   *same* full-extent grid with `-dstalpha` (transparent outside that tile's
-   own footprint). gdal3.js's `gdalwarp` takes exactly one source dataset —
-   verified empirically, it has no `gdalbuildvrt` and a second call to the
-   same destination replaces rather than merges — so the tiles are instead
-   composited on a `<canvas>` (transparent pixels don't overwrite pixels an
-   earlier tile already drew) and the composite is re-georeferenced with one
-   more `gdal_translate -a_srs -a_ullr` call.
-4. `/api/proxy` exists only because most government WMS/WCS servers don't
-   send CORS headers; it does not process anything, just relays bytes past
-   the browser's cross-origin restrictions (same-origin `Sec-Fetch-Site`
-   checked, private/loopback hosts rejected, 80 MB cap, 60 s timeout).
+1. The browser POSTs the pasted URL to `/api/resolve`.
+2. The worker fetches and parses the relevant OGC capabilities when needed.
+3. For WCS, the browser fetches the GetCoverage response through `/api/proxy` and clips it in-browser.
+4. For WMS, the browser downloads tiles through `/api/proxy`, georeferences them, and mosaics them before the final clip.
+5. `/api/proxy` is used to relay raw bytes past the source server's CORS restrictions;
+   it does not process the raster itself.
 
 ## Feedback notifications
 
-The feedback form always saves to the `feedback` D1 table (`migrations/`) —
-after deploying for the first time, apply it once with:
+The feedback form writes to the `feedback` D1 table (`migrations/`). After the first deployment, apply the migration once with:
 
 ```bash
 npx wrangler d1 migrations apply wms-wcs-aoi-feedback --remote
 ```
 
-Without that, `/api/feedback` returns a 503 and nothing is saved (this bit
-the first deploy of this app: the table simply didn't exist yet). An email
-notification on top of that is optional and needs two things: `NOTIFY_EMAIL`
-(the destination, already set as a plain var in `wrangler.jsonc`) and
-`RESEND_API_KEY` (a [Resend](https://resend.com) API key, kept as a secret,
-never committed):
+Without that migration, `/api/feedback` will fail with a 503 and no row will be stored. Email notifications are optional and require:
+
+- `NOTIFY_EMAIL` as a plain variable in `wrangler.jsonc`,
+- `RESEND_API_KEY` as a Cloudflare secret:
 
 ```bash
 npx wrangler secret put RESEND_API_KEY
 ```
 
-Resend's free tier (100 emails/day) needs no domain of your own — it sends
-from the shared `onboarding@resend.dev` address, which works for a
-low-volume notification like this. Leaving the secret unset just means no
-email goes out; the D1 row is still saved either way.
+If no secret is configured, the D1 row is still saved but no email is sent.
 
 ## Requirements
 
 - Python 3.9+
-- GDAL command-line tools (`ogrinfo`, `gdal_translate`, `gdalbuildvrt`,
-  `gdalwarp`) on `PATH`, or pass `--gdal-bin` pointing at the directory
-  containing them (e.g. a QGIS install's `bin` folder on Windows).
+- GDAL command-line tools (`ogrinfo`, `gdal_translate`, `gdalbuildvrt`, `gdalwarp`) on `PATH`, or `--gdal-bin` pointing to the directory containing them,
 - `pip install -r requirements.txt`
 
-## Usage
+## Quick start
 
-AOI must already be reprojected to the CRS you're querying with — reproject
-first with `ogr2ogr -t_srs EPSG:XXXX` if needed. WCS support is explicitly
-limited to the proven WCS 1.0.0 GetCoverage request. WMS supports 1.1.1 and
-1.3.0; EPSG:4326 axis order is handled correctly for 1.3.0.
+AOI data must already be in the same CRS as the service being queried. Reproject it first if needed, for example with `ogr2ogr -t_srs EPSG:XXXX`.
 
-**WCS (native values):**
+### WCS (native values)
 
 ```bash
 python fetch.py --service wcs \
@@ -149,7 +123,7 @@ python fetch.py --service wcs \
   --out dsm_native.tif
 ```
 
-**WMS (rendered mosaic):**
+### WMS (rendered mosaic)
 
 ```bash
 python fetch.py --service wms \
@@ -164,39 +138,30 @@ python fetch.py --service wms \
 
 ## Working around a geo-blocked server
 
-Some government WMS/WCS servers reject requests from cloud/foreign IP
-ranges outright (connection refused or timeout on both HTTP and HTTPS,
-while a normal browser on a local ISP connection works fine). If that's
-the case for you:
+Some government WMS/WCS endpoints reject requests from cloud or foreign IP ranges. If your browser can access the service but your server cannot, try one of these strategies:
 
-- `--relay microlink` routes **WMS** `GetMap` requests through a
-  screenshot API instead of fetching the URL directly — it renders the URL
-  in a real browser and returns the resulting image. This only works for
-  image tiles (WMS), never for WCS: a screenshot relay re-encodes the
-  response as an image, which would silently corrupt raw elevation values.
-- For a blocked **WCS** request, there's no safe generic relay — you need
-  a proxy that forwards raw bytes unmodified. Point `--url` at that proxy
-  if you have one.
+- `--relay microlink` routes WMS `GetMap` requests through a browser-rendering screenshot API,
+- for blocked WCS requests, there is no safe generic relay for raw binary data; a trusted proxy that forwards bytes without modification is required.
 
 ## Safety limits
 
-- `--max-tiles` (default 4096) refuses a WMS job before it starts if the AOI,
-  resolution and tile size would need more GetMap requests than that — catches
-  a mistaken CRS or resolution before it hammers the server for hours.
-- `--cleanup` deletes the intermediates (`_RAW.tif`, `_MOSAIC.tif`, `.vrt`,
-  the WMS tile cache) once the final clipped output exists. Leave it off to
-  keep the WMS tile cache for a resumable re-run.
-- A failed run exits with status 1 and a one-line `error: ...` message on
-  stderr instead of a Python traceback.
+- `--max-tiles` refuses a WMS job before it starts if the AOI, resolution and tile size would exceed the configured tile budget,
+- `--cleanup` removes intermediate files such as `_RAW.tif`, `_MOSAIC.tif`, `.vrt` and the WMS tile cache once the final output exists,
+- failed runs exit with a short `error: ...` message on stderr instead of a Python traceback,
+- the app enforces a maximum pixel budget to avoid unexpectedly huge GeoTIFF generation.
 
 ## Output
 
-- `<out>`: final clipped GeoTIFF.
-- `<output-name>_tiles/`: (WMS mode) individual downloaded/georeferenced tiles, kept so a
-  re-run resumes instead of re-downloading everything, unless `--cleanup` is passed.
-- `<out>.vrt`, `<out>_MOSAIC.tif` / `<out>_RAW.tif`: intermediate files, safe
-  to delete once you have the final clipped output (or pass `--cleanup`).
+The CLI writes the following artifacts:
+
+- `<out>`: final clipped GeoTIFF,
+- `<output-name>_tiles/`: WMS-only tile cache, kept for resumable reruns unless `--cleanup` is passed,
+- `<out>.vrt`, `<out>_MOSAIC.tif`, `<out>_RAW.tif`: intermediate files, safe to delete once the final output is verified.
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## Contributing
+
+Contributions are welcome. The project is intentionally simple and test-driven, and the existing Node and Python test files are a good place to add new regression coverage.
