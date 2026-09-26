@@ -3,7 +3,7 @@
 // then from the service's own GetCapabilities document. A JS port of the
 // same interpret_url() this app used to run inside a Cloudflare Container;
 // it now runs directly in the Worker (no GDAL needed for this part).
-import { parseElements, layerIdentifier, boxFromElement, firstLayerName } from './xml.mjs';
+import { parseElements, layerIdentifier, boxFromElement, firstLayerName, scaleDenominatorLimits } from './xml.mjs';
 
 export const SUPPORTED_SERVICES = ['wms', 'wcs'];
 export const DEFAULT_VERSION = { wms: '1.3.0', wcs: '1.0.0' };
@@ -76,6 +76,38 @@ export function reprojectBounds(bounds, fromCrs, toCrs) {
   return null;
 }
 
+// A rough (not geodetically exact) meters-per-pixel -> scale-denominator
+// conversion, only ever used to warn, never to reject a request: the OGC
+// spec's standardized pixel size (0.28mm) times the map scale gives the
+// ground size of one pixel.
+const METERS_PER_DEGREE = 111_320;
+const OGC_STANDARDIZED_PIXEL_SIZE_M = 0.00028;
+const GEOGRAPHIC_CRS = new Set(['EPSG:4326', 'EPSG:4258', 'CRS:84']);
+
+export function estimateScaleDenominator(resolution, crs) {
+  const metersPerPixel = GEOGRAPHIC_CRS.has(crs.toUpperCase()) ? resolution * METERS_PER_DEGREE : resolution;
+  return metersPerPixel / OGC_STANDARDIZED_PIXEL_SIZE_M;
+}
+
+/**
+ * A layer restricted to renderng below some scale (e.g. a building-footprint
+ * style GeoServer only draws past 1:40000) comes back as a validly-formed
+ * but entirely blank GeoTIFF when the request covers its full advertised
+ * extent -- this reads as "the app is broken", not "this layer needs a
+ * tighter area", so it is worth a plain-language warning rather than silence.
+ */
+function scaleWarning(maxScaleDenominator, resolution, crs) {
+  if (!maxScaleDenominator) return null;
+  const requestScaleDenominator = estimateScaleDenominator(resolution, crs);
+  if (requestScaleDenominator <= maxScaleDenominator) return null;
+  const fmt = (n) => Math.round(n).toLocaleString('en-US');
+  return (
+    `This layer only renders below 1:${fmt(maxScaleDenominator)} scale; at the full extent ` +
+    `(about 1:${fmt(requestScaleDenominator)}), the download will likely be blank. Paste a ` +
+    'GetMap URL with a smaller BBOX (e.g. around one town or district) for visible content.'
+  );
+}
+
 function pixelCount(bounds, resolution) {
   const [minx, miny, maxx, maxy] = bounds;
   return ((maxx - minx) / resolution) * ((maxy - miny) / resolution);
@@ -146,7 +178,7 @@ async function advertisedBounds(fetchImpl, service, endpoint, layer, version, cr
   for (const element of elements) {
     if (layerIdentifier(element, service) === layer) {
       const candidate = boxFromElement(element, crs);
-      if (candidate) return candidate;
+      if (candidate) return { ...candidate, scale: service === 'wms' ? scaleDenominatorLimits(element) : null };
     }
   }
   throw new ResolveError(`The service did not advertise an extent for layer '${layer}'. Try a different URL.`);
@@ -233,8 +265,10 @@ export async function interpretUrl(rawUrl, fetchImpl) {
     }
   }
 
+  let maxScaleDenominator = null;
   if (!bounds) {
     const found = await advertisedBounds(fetchImpl, service, endpoint, layer, version, crs);
+    maxScaleDenominator = found.scale?.max ?? null;
     const reprojected = reprojectBounds(found.bounds, found.crs, crs);
     if (reprojected) {
       bounds = reprojected;
@@ -268,5 +302,7 @@ export async function interpretUrl(rawUrl, fetchImpl) {
   let imageFormat = params.FORMAT || '';
   if (!['image/png', 'image/jpeg'].includes(imageFormat)) imageFormat = 'image/png';
 
-  return { service, endpoint, version, layer, crs, bounds, resolution, imageFormat };
+  const warning = scaleWarning(maxScaleDenominator, resolution, crs);
+
+  return { service, endpoint, version, layer, crs, bounds, resolution, imageFormat, warning };
 }

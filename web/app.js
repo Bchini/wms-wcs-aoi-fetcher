@@ -6,6 +6,7 @@ const urlField = document.querySelector('#service-url');
 const detectedPanel = document.querySelector('#detected-panel');
 const detectedSummary = document.querySelector('#detected-summary');
 const resolutionSelect = document.querySelector('#resolution-select');
+const scaleWarningEl = document.querySelector('#scale-warning');
 const processStatus = document.querySelector('#process-status');
 const launchButton = document.querySelector('#launch-button');
 const progressTrack = document.querySelector('#progress-track');
@@ -31,6 +32,7 @@ function resetDetection() {
   detected = null;
   detectedForUrl = null;
   detectedPanel.hidden = true;
+  scaleWarningEl.hidden = true;
   launchButton.textContent = 'DETECT';
   processStatus.textContent = DEFAULT_STATUS;
 }
@@ -137,6 +139,8 @@ async function detect(url) {
     detectedPanel.hidden = false;
     detectedSummary.textContent =
       `${resolved.service.toUpperCase()} · ${resolved.layer} · ${resolved.crs}`;
+    scaleWarningEl.textContent = resolved.warning || '';
+    scaleWarningEl.hidden = !resolved.warning;
     processStatus.textContent = 'Choose a resolution, then press DOWNLOAD GEOTIFF.';
     launchButton.textContent = 'DOWNLOAD GEOTIFF';
   } catch (error) {

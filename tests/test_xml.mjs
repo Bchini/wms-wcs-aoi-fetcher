@@ -6,6 +6,7 @@ import {
   hasBoundingBox,
   boxFromElement,
   firstLayerName,
+  scaleDenominatorLimits,
 } from '../src/xml.mjs';
 
 const WMS_CAPABILITIES = `<?xml version="1.0"?>
@@ -82,6 +83,19 @@ test('firstLayerName skips a nameless container layer', () => {
 test('firstLayerName reads a WCS CoverageOfferingBrief', () => {
   const elements = parseElements(WCS_CAPABILITIES);
   assert.equal(firstLayerName(elements, 'wcs'), 'demo:coverage_a');
+});
+
+test('scaleDenominatorLimits reads MaxScaleDenominator on a real layer', () => {
+  const [element] = parseElements(
+    '<Layer xmlns="http://www.opengis.net/wms"><Name>x</Name>' +
+      '<MaxScaleDenominator>40000.0</MaxScaleDenominator></Layer>'
+  );
+  assert.deepEqual(scaleDenominatorLimits(element), { min: null, max: 40000 });
+});
+
+test('scaleDenominatorLimits returns null when neither bound is declared', () => {
+  const [element] = parseElements('<Layer xmlns="http://www.opengis.net/wms"><Name>x</Name></Layer>');
+  assert.equal(scaleDenominatorLimits(element), null);
 });
 
 test('layerIdentifier + boxFromElement find the requested CRS on a real layer', () => {

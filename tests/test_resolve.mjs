@@ -1,6 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { interpretUrl, ResolveError, reprojectBounds, lonLatToWebMercator } from '../src/resolve.mjs';
+import {
+  interpretUrl,
+  ResolveError,
+  reprojectBounds,
+  lonLatToWebMercator,
+  estimateScaleDenominator,
+} from '../src/resolve.mjs';
 
 const WMS_CAPABILITIES = `<?xml version="1.0"?>
 <WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms">
@@ -182,4 +188,53 @@ test('reprojectBounds returns null for an unsupported CRS pair', () => {
 test('reprojectBounds is a no-op when source and target CRS already match', () => {
   const bounds = [-10, 30, 10, 50];
   assert.deepEqual(reprojectBounds(bounds, 'EPSG:4326', 'epsg:4326'), bounds);
+});
+
+// Regression: a GeoServer layer restricted to a fine rendering scale (e.g. a
+// per-building style, common for INSPIRE Buildings themes) silently returns
+// a validly-formed but entirely blank image for a full-region request -- the
+// bug this guards against is the app staying silent about it, which reads as
+// "the app is broken" rather than "this layer needs a tighter area".
+const SCALE_RESTRICTED_CAPABILITIES = `<?xml version="1.0"?>
+<WMS_Capabilities version="1.3.0" xmlns="http://www.opengis.net/wms">
+  <Service><Name>WMS</Name></Service>
+  <Capability>
+    <Layer>
+      <Layer>
+        <Name>demo:buildings</Name>
+        <BoundingBox CRS="EPSG:4326" minx="43.8" miny="7.5" maxx="44.7" maxy="10.0"/>
+        <MaxScaleDenominator>40000.0</MaxScaleDenominator>
+      </Layer>
+    </Layer>
+  </Capability>
+</WMS_Capabilities>`;
+
+test('a full-extent request against a scale-restricted layer carries a warning', async () => {
+  const fetchImpl = fakeFetch({ wms: SCALE_RESTRICTED_CAPABILITIES });
+  const resolved = await interpretUrl(
+    'https://example.test/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetCapabilities&LAYERS=demo:buildings',
+    fetchImpl
+  );
+  assert.ok(resolved.warning);
+  assert.match(resolved.warning, /1:40,000/);
+});
+
+test('a literal BBOX request (no capabilities re-fetched) carries no scale warning', async () => {
+  const fetchImpl = fakeFetch({ wms: SCALE_RESTRICTED_CAPABILITIES });
+  const resolved = await interpretUrl(
+    'https://example.test/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
+      '&LAYERS=demo:buildings&CRS=EPSG:4326&BBOX=43.9,7.6,43.91,7.61&WIDTH=1024&HEIGHT=1024',
+    fetchImpl
+  );
+  assert.equal(resolved.warning, null);
+});
+
+test('estimateScaleDenominator converts a geographic (degrees) resolution using meters/degree', () => {
+  // 0.001 deg/px -> 111.32 m/px -> /0.00028 (the OGC standardized pixel size).
+  const scale = estimateScaleDenominator(0.001, 'EPSG:4326');
+  assert.ok(Math.abs(scale - 397_571.4) < 1);
+});
+
+test('estimateScaleDenominator treats a projected CRS resolution as meters/pixel directly', () => {
+  assert.ok(Math.abs(estimateScaleDenominator(0.28, 'EPSG:25832') - 1000) < 1e-6);
 });

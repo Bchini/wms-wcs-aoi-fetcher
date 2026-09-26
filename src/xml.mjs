@@ -150,6 +150,25 @@ export function boxFromElement(element, requestedCrs) {
   return null;
 }
 
+/**
+ * A layer's own MinScaleDenominator/MaxScaleDenominator, if it declares
+ * either (WMS-only; GeoServer commonly restricts a per-feature-style layer,
+ * e.g. building footprints, to render only below some scale so a
+ * full-extent request comes back blank instead of failing outright).
+ */
+export function scaleDenominatorLimits(element) {
+  if (!Array.isArray(element.children)) return null;
+  const min = directText(element.children, 'MinScaleDenominator');
+  const max = directText(element.children, 'MaxScaleDenominator');
+  const minValue = min != null ? parseFloat(min) : null;
+  const maxValue = max != null ? parseFloat(max) : null;
+  if (!Number.isFinite(minValue) && !Number.isFinite(maxValue)) return null;
+  return {
+    min: Number.isFinite(minValue) ? minValue : null,
+    max: Number.isFinite(maxValue) ? maxValue : null,
+  };
+}
+
 /** The first real, georeferenced layer/coverage advertised by the service. */
 export function firstLayerName(elements, service) {
   for (const element of elements) {
