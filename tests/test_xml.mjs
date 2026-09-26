@@ -56,6 +56,16 @@ test('WMS 1.1 SRS BoundingBox is not swapped', () => {
   assert.deepEqual(result.bounds, [-19, 27, 5, 44]);
 });
 
+test('CRS:84 BoundingBox is never swapped (always lon/lat, unlike EPSG:4326 in WMS 1.3)', () => {
+  const [element] = parseElements(
+    '<Layer xmlns="http://www.opengis.net/wms"><Name>x</Name>' +
+      '<BoundingBox CRS="CRS:84" minx="-19" miny="27" maxx="5" maxy="44"/></Layer>'
+  );
+  const result = boxFromElement(element, 'CRS:84');
+  assert.deepEqual(result.bounds, [-19, 27, 5, 44]);
+  assert.equal(result.crs, 'CRS:84');
+});
+
 test('projected CRS BoundingBox is never swapped', () => {
   const [element] = parseElements(
     '<Layer xmlns="http://www.opengis.net/wms"><Name>x</Name>' +

@@ -245,7 +245,13 @@ export async function interpretUrl(rawUrl, fetchImpl) {
   }
 
   let crs = (params.CRS || params.SRS || 'EPSG:4326').toUpperCase();
-  if (!/^EPSG:\d+$/.test(crs)) crs = 'EPSG:4326';
+  // CRS:84 is a real, commonly-advertised OGC identifier (WGS84, but always
+  // lon/lat axis order, unlike EPSG:4326 which swaps to lat/lon in WMS 1.3)
+  // -- forcing it to EPSG:4326 here used to silently mislabel its axis
+  // order downstream (wmsBbox() and boxFromElement() both key off the exact
+  // CRS string to decide whether to swap). Any other non-EPSG string is
+  // still rejected as junk input.
+  if (crs !== 'CRS:84' && !/^EPSG:\d+$/.test(crs)) crs = 'EPSG:4326';
 
   const bboxParam = params.BBOX;
   const widthParam = params.WIDTH;
@@ -304,5 +310,20 @@ export async function interpretUrl(rawUrl, fetchImpl) {
 
   const warning = scaleWarning(maxScaleDenominator, resolution, crs);
 
-  return { service, endpoint, version, layer, crs, bounds, resolution, imageFormat, warning };
+  return {
+    service,
+    endpoint,
+    version,
+    layer,
+    crs,
+    bounds,
+    resolution,
+    imageFormat,
+    warning,
+    // The raw threshold (or null), so the browser can recompute this same
+    // warning if the user later clips to an AOI or picks a different
+    // resolution -- `warning` above is only ever this app's own full-extent
+    // default request, and goes stale the moment either of those changes.
+    maxScaleDenominator,
+  };
 }

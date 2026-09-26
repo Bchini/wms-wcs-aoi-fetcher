@@ -89,6 +89,111 @@ export function resolutionOptions(
 }
 
 /**
+ * A resolution derived from an exact pixel width the user typed in, instead
+ * of one of the fixed presets -- for when a preset under- or over-shoots
+ * what they actually want. Guarded by the same pixel/tile ceiling as
+ * resolutionOptions() (a runaway width could otherwise hang the tab
+ * decoding a huge canvas, or queue hundreds of sequential tile fetches);
+ * pass `maxTiles: Infinity` for WCS, which this app never tiles.
+ */
+export function customResolution(
+  bounds,
+  targetWidth,
+  { maxPixels = 25_000_000, maxTiles = 64, tileSize = 1024 } = {}
+) {
+  const [minx, miny, maxx, maxy] = bounds;
+  if (!Number.isFinite(targetWidth) || targetWidth < 1) {
+    throw new Error('Enter a whole number of pixels for the custom width.');
+  }
+  const resolution = (maxx - minx) / targetWidth;
+  const width = Math.max(1, Math.round(targetWidth));
+  const height = Math.max(1, Math.round((maxy - miny) / resolution));
+  if (width * height > maxPixels) {
+    throw new Error(
+      `That width needs about ${Math.round((width * height) / 1_000_000)} million output pixels, over the ` +
+        `${Math.round(maxPixels / 1_000_000)} million limit. Try a smaller width, or upload an AOI to shrink the area.`
+    );
+  }
+  const { cols, rows } = tileGrid(minx, miny, maxx, maxy, tileSize, tileSize, resolution);
+  if (cols * rows > maxTiles) {
+    throw new Error(
+      `That width needs ${cols * rows} WMS tiles, over the ${maxTiles}-tile limit. Try a smaller width, or ` +
+        'upload an AOI to shrink the area.'
+    );
+  }
+  return { resolution, width, height, tiles: cols * rows };
+}
+
+// -- AOI support: a GeoJSON AOI's coordinates are always EPSG:4326 (RFC
+// 7946), so its bounding box needs reprojecting into whatever CRS the
+// service actually got detected in before it can be intersected with the
+// detected extent. Mirrors src/resolve.mjs's reprojectBounds() -- duplicated
+// here because that module runs in the Worker and this one in the browser;
+// both need to agree on the same closed-form cases.
+const WEB_MERCATOR_RADIUS = 6378137;
+
+export function lonLatToWebMercator(lon, lat) {
+  const x = ((lon * Math.PI) / 180) * WEB_MERCATOR_RADIUS;
+  const y = Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360)) * WEB_MERCATOR_RADIUS;
+  return [x, y];
+}
+
+/**
+ * Reproject an AOI's [minx, miny, maxx, maxy] (always EPSG:4326) into
+ * `toCrs`. Returns null when `toCrs` isn't one of the closed-form cases
+ * this app knows how to convert -- callers should fall back to the full
+ * detected extent rather than clip against a mislabeled box.
+ */
+export function reprojectAoiBounds(bounds, toCrs) {
+  const target = toCrs.toUpperCase();
+  if (target === 'EPSG:4326' || target === 'CRS:84') return bounds;
+  if (target === 'EPSG:3857' || target === 'EPSG:900913') {
+    const [minx, miny, maxx, maxy] = bounds;
+    const [x1, y1] = lonLatToWebMercator(minx, miny);
+    const [x2, y2] = lonLatToWebMercator(maxx, maxy);
+    return [x1, y1, x2, y2];
+  }
+  return null;
+}
+
+// -- Scale-denominator warning: mirrors src/resolve.mjs's estimate/warning
+// pair so the browser can recompute it after the user clips to an AOI or
+// changes the resolution, both of which the server never sees (the
+// server-computed `warning` in a /api/resolve response is only ever valid
+// for that response's own full-extent default request).
+const METERS_PER_DEGREE = 111_320;
+const OGC_STANDARDIZED_PIXEL_SIZE_M = 0.00028;
+const GEOGRAPHIC_CRS = new Set(['EPSG:4326', 'EPSG:4258', 'CRS:84']);
+
+export function estimateScaleDenominator(resolution, crs) {
+  const metersPerPixel = GEOGRAPHIC_CRS.has(crs.toUpperCase()) ? resolution * METERS_PER_DEGREE : resolution;
+  return metersPerPixel / OGC_STANDARDIZED_PIXEL_SIZE_M;
+}
+
+/** Same wording as resolve.mjs's scaleWarning(), minus the "full extent" framing (may now be an AOI clip). */
+export function scaleWarningText(maxScaleDenominator, resolution, crs) {
+  if (!maxScaleDenominator) return null;
+  const requestScaleDenominator = estimateScaleDenominator(resolution, crs);
+  if (requestScaleDenominator <= maxScaleDenominator) return null;
+  const fmt = (n) => Math.round(n).toLocaleString('en-US');
+  return (
+    `This layer only renders below 1:${fmt(maxScaleDenominator)} scale; at this resolution ` +
+    `(about 1:${fmt(requestScaleDenominator)}), the download will likely be blank. Pick a finer ` +
+    'resolution, or upload a smaller AOI.'
+  );
+}
+
+/** The overlap of two [minx, miny, maxx, maxy] boxes, or null if they don't overlap. */
+export function intersectBounds(a, b) {
+  const minx = Math.max(a[0], b[0]);
+  const miny = Math.max(a[1], b[1]);
+  const maxx = Math.min(a[2], b[2]);
+  const maxy = Math.min(a[3], b[3]);
+  if (minx >= maxx || miny >= maxy) return null;
+  return [minx, miny, maxx, maxy];
+}
+
+/**
  * Build the list of WMS GetMap tile requests covering [minx, miny, maxx, maxy]
  * at the given resolution, each carrying its own pixel bbox for georeferencing.
  */

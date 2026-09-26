@@ -181,6 +181,20 @@ test('requesting a CRS with no known transform falls back to the CRS the bounds 
   assert.deepEqual(resolved.bounds, [-10, 30, 10, 50]);
 });
 
+test('CRS:84 in a literal GetMap BBOX is kept as lon/lat, not force-relabeled to EPSG:4326', async () => {
+  const fetchImpl = fakeFetch({ wms: WMS_CAPABILITIES });
+  const resolved = await interpretUrl(
+    'https://example.test/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetMap' +
+      '&LAYERS=demo:layer_a&CRS=CRS:84&BBOX=-4,40,-3,41&WIDTH=1000&HEIGHT=1000',
+    fetchImpl
+  );
+  assert.equal(resolved.crs, 'CRS:84');
+  // The old bug: forcing CRS:84 to EPSG:4326 then applied WMS 1.3's
+  // EPSG:4326 axis swap to a BBOX that was already lon/lat (CRS:84 never
+  // swaps), silently flipping x and y.
+  assert.deepEqual(resolved.bounds, [-4, 40, -3, 41]);
+});
+
 test('reprojectBounds returns null for an unsupported CRS pair', () => {
   assert.equal(reprojectBounds([-10, 30, 10, 50], 'EPSG:4326', 'EPSG:31982'), null);
 });

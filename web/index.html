@@ -28,7 +28,17 @@
               <select id="resolution-select" name="resolution"></select>
             </label>
             <p class="hint" id="resolution-hint">Sized to this area — a small AOI can go much sharper than a full country extent.</p>
+            <label class="custom-width">Or set an exact output width in pixels, for the sharpest result the budget below allows
+              <input id="custom-width" type="number" min="1" step="1" placeholder="e.g. 6000" />
+            </label>
             <p class="scale-warning" id="scale-warning" hidden></p>
+
+            <label class="aoi-field">Optional — upload an AOI (GeoJSON) to download only that zone
+              <input id="aoi-file" type="file" accept=".geojson,.json,application/geo+json,application/json" />
+            </label>
+            <p class="hint">Clips to your AOI's bounding box instead of the full detected extent, and lets the resolution above go sharper on the same pixel/tile budget. Only for services detected in EPSG:4326 or EPSG:3857.</p>
+            <p class="aoi-status" id="aoi-status" hidden></p>
+            <div class="aoi-actions" id="aoi-actions" hidden><button type="button" class="aoi-clear" id="aoi-clear">Remove AOI</button></div>
           </div>
           <button class="launch" type="submit" id="launch-button">DETECT</button>
           <div class="progress-track" id="progress-track" hidden>

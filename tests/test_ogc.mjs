@@ -8,6 +8,9 @@ import {
   tileGrid,
   planWmsTiles,
   resolutionOptions,
+  customResolution,
+  reprojectAoiBounds,
+  intersectBounds,
 } from '../web/ogc.js';
 
 test('wmsBbox: WMS 1.3 EPSG:4326 uses latitude first', () => {
@@ -111,4 +114,55 @@ test('resolutionOptions: always returns at least one option, even in a pathologi
   assert.equal(options.length, 1);
   assert.equal(options[0].label, 'Maximum (capped)');
   assert.ok(options[0].width * options[0].height <= 100 * 4); // rounding slack
+});
+
+test('customResolution: derives height from the requested width, preserving aspect', () => {
+  const result = customResolution([0, 0, 20, 10], 4000);
+  assert.equal(result.width, 4000);
+  assert.equal(result.height, 2000);
+});
+
+test('customResolution: rejects a width over the pixel budget', () => {
+  assert.throws(() => customResolution([0, 0, 1, 1], 100_000, { maxPixels: 1_000_000 }), /million output pixels/);
+});
+
+test('customResolution: rejects a width needing too many WMS tiles', () => {
+  assert.throws(
+    () => customResolution([0, 0, 100, 100], 50_000, { maxPixels: 1e12, maxTiles: 64, tileSize: 1024 }),
+    /WMS tiles/
+  );
+});
+
+test('customResolution: maxTiles: Infinity bypasses the tile check (for WCS, which is never tiled)', () => {
+  const result = customResolution([0, 0, 100, 100], 50_000, { maxPixels: 1e12, maxTiles: Infinity });
+  assert.equal(result.width, 50_000);
+});
+
+test('customResolution: rejects a non-positive or non-finite width', () => {
+  assert.throws(() => customResolution([0, 0, 1, 1], 0), /Enter a whole number/);
+  assert.throws(() => customResolution([0, 0, 1, 1], NaN), /Enter a whole number/);
+});
+
+test('reprojectAoiBounds: EPSG:4326 and CRS:84 pass through unchanged', () => {
+  const bounds = [7.5, 43.8, 10.0, 44.6];
+  assert.deepEqual(reprojectAoiBounds(bounds, 'EPSG:4326'), bounds);
+  assert.deepEqual(reprojectAoiBounds(bounds, 'CRS:84'), bounds);
+});
+
+test('reprojectAoiBounds: converts to EPSG:3857', () => {
+  const [minx, miny, maxx, maxy] = reprojectAoiBounds([0, 0, 1, 1], 'EPSG:3857');
+  assert.ok(Math.abs(minx) < 1e-6 && Math.abs(miny) < 1e-6);
+  assert.ok(maxx > 0 && maxy > 0);
+});
+
+test('reprojectAoiBounds: null for a CRS with no closed-form conversion', () => {
+  assert.equal(reprojectAoiBounds([0, 0, 1, 1], 'EPSG:25832'), null);
+});
+
+test('intersectBounds: overlapping boxes', () => {
+  assert.deepEqual(intersectBounds([0, 0, 10, 10], [5, 5, 15, 15]), [5, 5, 10, 10]);
+});
+
+test('intersectBounds: null when the boxes do not overlap', () => {
+  assert.equal(intersectBounds([0, 0, 1, 1], [5, 5, 6, 6]), null);
 });

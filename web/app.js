@@ -1,4 +1,15 @@
-import { wmsBbox, wmsCrsParameter, serviceUrl, planWmsTiles, resolutionOptions } from './ogc.js';
+import {
+  wmsBbox,
+  wmsCrsParameter,
+  serviceUrl,
+  planWmsTiles,
+  resolutionOptions,
+  customResolution,
+  reprojectAoiBounds,
+  intersectBounds,
+  scaleWarningText,
+} from './ogc.js';
+import { boundsFromGeoJson } from './aoi.js';
 import { runWcs, runWms } from './gdal-runner.js';
 
 const form = document.querySelector('#fetch-form');
@@ -6,6 +17,11 @@ const urlField = document.querySelector('#service-url');
 const detectedPanel = document.querySelector('#detected-panel');
 const detectedSummary = document.querySelector('#detected-summary');
 const resolutionSelect = document.querySelector('#resolution-select');
+const customWidthInput = document.querySelector('#custom-width');
+const aoiFileInput = document.querySelector('#aoi-file');
+const aoiStatus = document.querySelector('#aoi-status');
+const aoiActions = document.querySelector('#aoi-actions');
+const aoiClearButton = document.querySelector('#aoi-clear');
 const scaleWarningEl = document.querySelector('#scale-warning');
 const processStatus = document.querySelector('#process-status');
 const launchButton = document.querySelector('#launch-button');
@@ -27,17 +43,107 @@ const DEFAULT_STATUS = "Paste a link and press DETECT to see the layer and choos
 // a different area entirely.
 let detected = null; // the last /api/resolve() result
 let detectedForUrl = null; // the URL string it was resolved from
+let aoiBounds = null; // an uploaded AOI's bbox, reprojected + intersected with detected.bounds
+
+function resetAoi() {
+  aoiBounds = null;
+  aoiFileInput.value = '';
+  aoiStatus.hidden = true;
+  aoiActions.hidden = true;
+}
 
 function resetDetection() {
   detected = null;
   detectedForUrl = null;
   detectedPanel.hidden = true;
   scaleWarningEl.hidden = true;
+  customWidthInput.value = '';
+  resetAoi();
   launchButton.textContent = 'DETECT';
   processStatus.textContent = DEFAULT_STATUS;
 }
 urlField.addEventListener('input', () => {
   if (urlField.value.trim() !== detectedForUrl) resetDetection();
+});
+
+/** [minx, miny, maxx, maxy] actually in effect: the AOI clip if one applied, else the full detected extent. */
+function effectiveBounds() {
+  return aoiBounds || detected.bounds;
+}
+
+/**
+ * Recompute the scale-denominator warning against whatever is currently
+ * selected (AOI or not, dropdown preset or a typed custom width) -- the
+ * `warning` a /api/resolve response carries is only ever valid for that
+ * response's own full-extent default request, and goes stale the moment
+ * either changes.
+ */
+function refreshScaleWarning() {
+  if (!detected) return;
+  const bounds = effectiveBounds();
+  const customWidth = Number(customWidthInput.value.trim());
+  const resolution = customWidth > 0 ? (bounds[2] - bounds[0]) / customWidth : Number(resolutionSelect.value);
+  if (!Number.isFinite(resolution) || resolution <= 0) return;
+  const warning = scaleWarningText(detected.maxScaleDenominator, resolution, detected.crs);
+  scaleWarningEl.textContent = warning || '';
+  scaleWarningEl.hidden = !warning;
+}
+resolutionSelect.addEventListener('change', refreshScaleWarning);
+customWidthInput.addEventListener('input', refreshScaleWarning);
+
+function formatCoord(n) {
+  return Math.round(n * 1e5) / 1e5;
+}
+
+aoiFileInput.addEventListener('change', async () => {
+  const file = aoiFileInput.files[0];
+  if (!file) return;
+  if (!detected) {
+    aoiFileInput.value = '';
+    aoiStatus.hidden = false;
+    aoiStatus.classList.add('is-error');
+    aoiStatus.textContent = 'Press DETECT first, then upload your AOI.';
+    return;
+  }
+  try {
+    const geojson = JSON.parse(await file.text());
+    const lonLatBounds = boundsFromGeoJson(geojson);
+    const reprojected = reprojectAoiBounds(lonLatBounds, detected.crs);
+    if (!reprojected) {
+      throw new Error(
+        `AOI clipping isn't supported for ${detected.crs} yet (only EPSG:4326/EPSG:3857 services). Using the full extent instead.`
+      );
+    }
+    const clipped = intersectBounds(reprojected, detected.bounds);
+    if (!clipped) {
+      throw new Error("This AOI doesn't overlap the detected layer's extent.");
+    }
+    aoiBounds = clipped;
+    aoiActions.hidden = false;
+    aoiStatus.hidden = false;
+    aoiStatus.classList.remove('is-error');
+    const [minx, miny, maxx, maxy] = clipped;
+    aoiStatus.textContent =
+      `AOI applied — downloading only ${formatCoord(minx)}, ${formatCoord(miny)} to ` +
+      `${formatCoord(maxx)}, ${formatCoord(maxy)} (${detected.crs}).`;
+  } catch (error) {
+    aoiBounds = null;
+    aoiFileInput.value = '';
+    aoiActions.hidden = true;
+    aoiStatus.hidden = false;
+    aoiStatus.classList.add('is-error');
+    aoiStatus.textContent = error.message;
+  }
+  populateResolutionSelect(detected, effectiveBounds());
+  refreshScaleWarning();
+});
+
+aoiClearButton.addEventListener('click', () => {
+  resetAoi();
+  if (detected) {
+    populateResolutionSelect(detected, effectiveBounds());
+    refreshScaleWarning();
+  }
 });
 
 // Best-effort client-side read of SERVICE/VERSION from the pasted URL, purely
@@ -108,8 +214,8 @@ function triggerDownload(blob, filename) {
   URL.revokeObjectURL(downloadUrl);
 }
 
-function populateResolutionSelect(resolved) {
-  const options = resolutionOptions(resolved.bounds, { tileSize: WMS_TILE_SIZE });
+function populateResolutionSelect(resolved, bounds) {
+  const options = resolutionOptions(bounds, { tileSize: WMS_TILE_SIZE });
   resolutionSelect.innerHTML = '';
   for (const option of options) {
     const el = document.createElement('option');
@@ -135,12 +241,12 @@ async function detect(url) {
     const resolved = await resolveUrl(url);
     detected = resolved;
     detectedForUrl = url;
-    populateResolutionSelect(resolved);
+    resetAoi();
+    populateResolutionSelect(resolved, resolved.bounds);
     detectedPanel.hidden = false;
     detectedSummary.textContent =
       `${resolved.service.toUpperCase()} · ${resolved.layer} · ${resolved.crs}`;
-    scaleWarningEl.textContent = resolved.warning || '';
-    scaleWarningEl.hidden = !resolved.warning;
+    refreshScaleWarning();
     processStatus.textContent = 'Choose a resolution, then press DOWNLOAD GEOTIFF.';
     launchButton.textContent = 'DOWNLOAD GEOTIFF';
   } catch (error) {
@@ -151,7 +257,26 @@ async function detect(url) {
   }
 }
 
-async function runDownload(resolved, resolution) {
+/**
+ * The [bounds, resolution] a download should actually run with: the AOI
+ * clip if one is applied (else the full detected extent), and either the
+ * custom pixel width (if the user typed one) or whatever the dropdown has
+ * selected. Throws a plain-language Error if the custom width blows the
+ * pixel/tile safety budget -- caught by the submit handler before any
+ * network request goes out.
+ */
+function resolveRunParams(resolved) {
+  const bounds = effectiveBounds();
+  const customWidth = customWidthInput.value.trim();
+  if (customWidth) {
+    const budget = resolved.service === 'wcs' ? { maxTiles: Infinity, tileSize: WMS_TILE_SIZE } : { tileSize: WMS_TILE_SIZE };
+    const { resolution } = customResolution(bounds, Number(customWidth), budget);
+    return { bounds, resolution };
+  }
+  return { bounds, resolution: Number(resolutionSelect.value) };
+}
+
+async function runDownload(resolved, bounds, resolution) {
   launchButton.disabled = true;
   launchButton.textContent = 'RUNNING…';
   showProgress();
@@ -166,17 +291,17 @@ async function runDownload(resolved, resolution) {
         coverage: resolved.layer,
         crs: resolved.crs,
         response_crs: resolved.crs,
-        bbox: resolved.bounds.join(','),
+        bbox: bounds.join(','),
         resx: String(resolution),
         resy: String(resolution),
         format: 'GeoTIFF',
       };
       blob = await runWcs(
-        { url: serviceUrl(resolved.endpoint, params), bounds: resolved.bounds, resolution, crs: resolved.crs },
+        { url: serviceUrl(resolved.endpoint, params), bounds, resolution, crs: resolved.crs },
         updateProgress
       );
     } else {
-      const [minx, miny, maxx, maxy] = resolved.bounds;
+      const [minx, miny, maxx, maxy] = bounds;
       const tiles = planWmsTiles({
         minx, miny, maxx, maxy,
         tileW: WMS_TILE_SIZE, tileH: WMS_TILE_SIZE, resolution,
@@ -197,7 +322,7 @@ async function runDownload(resolved, resolution) {
       }));
       processStatus.textContent = `Fetching ${tiles.length} tile${tiles.length > 1 ? 's' : ''} from ${resolved.layer} (WMS) and mosaicking in your browser…`;
       blob = await runWms(
-        { tiles, bounds: resolved.bounds, resolution, crs: resolved.crs },
+        { tiles, bounds, resolution, crs: resolved.crs },
         updateProgress
       );
     }
@@ -222,7 +347,14 @@ form.addEventListener('submit', async (event) => {
   }
   const url = urlField.value.trim();
   if (detected && detectedForUrl === url) {
-    await runDownload(detected, Number(resolutionSelect.value));
+    let bounds, resolution;
+    try {
+      ({ bounds, resolution } = resolveRunParams(detected));
+    } catch (error) {
+      processStatus.textContent = error.message;
+      return;
+    }
+    await runDownload(detected, bounds, resolution);
   } else {
     await detect(url);
   }

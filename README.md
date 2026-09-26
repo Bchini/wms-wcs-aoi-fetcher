@@ -36,7 +36,12 @@ Paste a WMS or WCS URL and press **DETECT**. The interface tries to infer everyt
 - CRS from `CRS=` / `SRS=` or defaulting to `EPSG:4326`,
 - extent from a literal `BBOX` or from the service's advertised capabilities.
 
-The app then proposes resolution presets sized for the actual area selected, keeping the request under the configured pixel and tile budgets.
+The app then proposes resolution presets sized for the actual area selected, keeping the request under the configured pixel and tile budgets. Two optional refinements are available once a URL is detected:
+
+- **Custom resolution** — type an exact output width (in pixels) instead of picking a preset, for the sharpest result the pixel/tile budget allows.
+- **AOI upload** — upload a GeoJSON polygon to download only that zone instead of the full detected extent (clipped to the AOI's bounding box). This also lets the resolution go sharper, since the same pixel/tile budget is now spent on a smaller area. Only supported when the detected service is in EPSG:4326 or EPSG:3857; other CRS fall back to the full extent with a clear message.
+
+If a layer restricts its own rendering to a fine scale (e.g. a per-building GeoServer style with `MaxScaleDenominator`), the app warns when the current resolution/AOI combination would come back blank, and the warning updates live as you adjust either one.
 
 ## Why WCS vs WMS matters
 
